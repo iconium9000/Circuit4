@@ -15,33 +15,32 @@ storage_class_specifier ::= 'auto'
                             | 'extern'
                             | 'typedef'
 
-type_specifier ::= 'void'
-                   | 'char'
-                   | 'short'
-                   | 'int'
-                   | 'long'
-                   | 'float'
-                   | 'double'
-                   | 'signed'
-                   | 'unsigned'
+type_specifier ::= literal_type
                    | struct_or_union_specifier
                    | enum_specifier
                    | typedef_name
 
-struct_or_union_specifier ::= struct_or_union identifier { {struct_declaration}+ }
-                              | struct_or_union { {struct_declaration}+ }
+literal_type ::= 'void'
+                | 'char'
+                | 'short'
+                | 'int'
+                | 'long'
+                | 'float'
+                | 'double'
+                | 'signed'
+                | 'unsigned'
+
+struct_or_union_specifier ::= struct_or_union identifier '{' {struct_declaration}+ '}'
+                              | struct_or_union '{' {struct_declaration}+ '}'
                               | struct_or_union identifier
 
-struct_or_union ::= 'struct'
-                    | 'union'
+struct_or_union ::= 'struct' | 'union'
 
 struct_declaration ::= {specifier_qualifier}* struct_declarator_list
 
-specifier_qualifier ::= type_specifier
-                        | type_qualifier
+specifier_qualifier ::= type_specifier | type_qualifier
 
-struct_declarator_list ::= struct_declarator
-                           | struct_declarator_list ',' struct_declarator
+struct_declarator_list ::= struct_declarator {',' struct_declarator}*
 
 struct_declarator ::= declarator
                       | declarator ':' constant_expression
@@ -51,8 +50,7 @@ declarator ::= {pointer}? direct_declarator
 
 pointer ::= '*' {type_qualifier}* {pointer}?
 
-type_qualifier ::= 'const'
-                   | 'volatile'
+type_qualifier ::= 'const' | 'volatile'
 
 direct_declarator ::= identifier
                       | '(' declarator ')'
@@ -194,11 +192,9 @@ init_declarator ::= declarator
                     | declarator '=' initializer
 
 initializer ::= assignment_expression
-                | '{' initializer_list '}'
-                | '{' initializer_list ',' '}'
+                | '{' initializer_list {','}? '}'
 
-initializer_list ::= initializer
-                     | initializer_list ',' initializer
+initializer_list ::= initializer {',' initializer}*
 
 compound_statement ::= '{' {declaration}* {statement}* '}'
 
