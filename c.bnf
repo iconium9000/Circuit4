@@ -58,6 +58,14 @@ direct_declarator ::= identifier
                       | direct_declarator '(' parameter_type_list ')'
                       | direct_declarator '(' {identifier}* ')'
 
+direct_declarator ::= (identifier | declarator_param) direct_declarator_op*
+declarator_param ::= '(' declarator ')'
+direct_declarator_op ::= declarator_subscript | declarator_params | declarator_identifiers
+
+declarator_subscript ::= '[' {constant_expression}? ']'
+declarator_params ::= '(' parameter_type_list ')'
+declarator_identifiers ::= '(' {identifier}* ')'
+
 constant_expression ::= conditional_expression
 
 conditional_expression ::= logical_or_expression
