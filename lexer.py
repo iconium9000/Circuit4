@@ -81,7 +81,7 @@ class tabs:
     num = 0
 
     @classmethod
-    def now(cls): return '|' * cls.num
+    def now(cls): return '  ' * cls.num
     def __init__(self, *args): self.args = args
     def __enter__(self):
         print(self.now() + 'tabs', *self.args)
@@ -92,6 +92,7 @@ def withtabs(c:'Callable[[parser],parsenode]'):
     def _withtabs(p:'parser'):
         with tabs(c.__name__):
             return c(p)
+    _withtabs.__name__ = c.__name__
     return _withtabs
 
 class parsenode:
@@ -156,17 +157,24 @@ class parser:
             print(lex)
 
     def parsefail(self, *args:str):
-        print(tabs.now() + 'fail', *args, self.lexlist[self.lexidx])
         return parsefail(*args)
 
     def getnext(self):
+        idx = self.lexidx
+        while isinstance(tok := self._getnext(), tabtok):
+            if not self.tracking:
+                return idx,None
+            self.lexidx += 1
+        return idx,tok
+
+    def _getnext(self):
         if (idx := self.lexidx) >= self.lexlist_len:
             raise self.parsefail('hit-endmarker')
         self.lexidx += 1
         return self.lexlist[idx]
 
     def trynewline(self):
-        idx,tok = self.lexidx, self.getnext()
+        idx,tok = self.lexidx, self._getnext()
         if not isinstance(tok, tabtok):
             raise self.parsefail('trynewline', 'not-tabtok')
         if tok.tabs == self.indentlevel: return
@@ -190,43 +198,51 @@ class parser:
 
     def resetidx(self, idx:int): self.lexidx = idx
 
+    def tryname(self):
+        pass
+
     def tryops(self, *ops:str, optional:bool=False):
-        idx = self.lexidx
-
-        while isinstance(tok := self.getnext(), tabtok):
-            if not self.tracking:
-                if optional: return self.resetidx(idx)
-                raise self.parsefail('tryops', 'tabtok')
-            self.lexidx += 1
-
+        idx,tok = self.getnext()
+        if tok is None: return self.resetidx(idx)
         if not isinstance(tok, optok):
             raise self.parsefail('tryops', 'not-op')
         elif tok.op in ops: return tok
         if optional: return self.resetidx(idx)
-        raise self.parsefail('tryops', 'not-found')
+        raise self.parsefail('tryops', 'not-found', ops)
 
     def trywhile(self, arg:Callable[['parser'],parsenode], min=0):
         idx = -1
         ret:'list[parsenode]' = []
-        while idx < (idx := self.lexidx) and (argret := self.tryoptional(arg)):
-            ret.append(argret)
-        if argret: raise self.parsefail('trywhile', 'nomove')
+        try:
+            while idx < (idx := self.lexidx):
+                ret.append(arg(self))
+            nomove = True
+        except parsefail as fargs:
+            self.resetidx(idx)
+            print(tabs.now() + 'trywhile', 'catch', fargs, self.lexlist[self.lexidx])
+            nomove = False
+        if nomove: raise self.parsefail('trywhile', 'nomove', arg.__name__)
         elif len(ret) < min:
             raise self.parsefail('trywhile', 'retmin', len(ret), min)
         return ret
 
     def tryor(self, *args:Callable[['parser'],parsenode], optional:bool=False):
         idx = self.lexidx
-        for arg in args:
-            try: return arg(self)
-            except parsefail: self.lexidx = idx
-        if optional: return self.resetidx(idx)
-        raise self.parsefail('tryor')
+        with tabs('tryor', [arg.__name__ for arg in args]):
+            for arg in args:
+                try: return arg(self)
+                except parsefail as fargs:
+                    self.resetidx(idx)
+                    print(tabs.now() + 'tryor', 'catch', fargs, self.lexlist[self.lexidx])
+            if optional: return self.resetidx(idx)
+            raise self.parsefail('tryor', 'no-match', *(arg.__name__ for arg in args))
 
     def tryoptional(self, arg:Callable[['parser'],parsenode]):
         idx = self.lexidx
         try: return arg(self)
-        except parsefail: self.lexidx = idx
+        except parsefail as fargs:
+            self.lexidx = idx
+            print(tabs.now() + 'tryoptional', 'catch', fargs, self.lexlist[self.lexidx])
         return self.resetidx(idx)
 
 def tryops(*args:str, optional:bool=False):
@@ -244,7 +260,7 @@ class file_input(parsenode):
 
 @withtabs
 def stmt(p:parser):
-    return p.tryor(simple_stmt, compound_stmt)
+    return p.tryor(compound_stmt, simple_stmt)
 
 @withtabs
 class simple_stmt(parsenode):
@@ -333,9 +349,10 @@ class nonlocal_stmt(parsenode): pass
 class assert_stmt(parsenode): pass
 
 class operator(parsenode):
-    def __init__(self, op:str, *args:parsenode):
+    def __init__(self, op:str, *args:'parsenode|None'):
         self.op = op
         self.args = args
+        self.error = args.count(None) > 0
 
 def expr_test(f:'Callable[[], tuple[Callable[[parser],parsenode],Callable[[parser],str]]]'):
     def _expr_test(p:parser):
@@ -396,8 +413,10 @@ class subscription(parsenode):
         p.tryops(']')
 
 @withtabs
-class attributeref(parsenode): pass
-
+class attributeref(parsenode):
+    def __init__(self, p:parser):
+        p.tryops('.')
+        self.name = p.tryname()
 
 def trailer(p:parser): return p.tryor(call, subscription, attributeref)
 
@@ -412,15 +431,15 @@ def atom_expr(p:parser):
 def power(p:parser):
     ret = atom_expr(p)
     if p.tryops('**', optional=True):
-        return operator('**', ret, factor(p))
+        return operator('**', ret, p.tryoptional(factor))
+    return ret
 
 @withtabs
 def factor(p:parser):
     ops = p.trywhile(tryops('+','-','~'))
     ret = power(p)
     ops.reverse()
-    for op in ops:
-        ret = operator('factor' + op, ret)
+    for op in ops: ret = operator(op, ret)
     return ret
 
 @expr_test
@@ -437,7 +456,7 @@ def xor_expr(): return and_expr, tryops('^')
 def expr(): return xor_expr, tryops('|')
 @expr_test
 def comparison():
-    def _tryops(p:parser):
+    def comparison_ops(p:parser):
         if ret := p.tryops('<','>','==','>=','<=','<>','!=','in', optional=True):
             return ret
         elif ret := p.tryops('is'):
@@ -449,7 +468,7 @@ def comparison():
                 return optok(ret.info, 'not in')
             raise p.parsefail('comparison', 'no-in-after-not')
         raise p.parsefail('comparison', 'no-op')
-    return expr, _tryops
+    return expr, comparison_ops
 
 @withtabs
 def not_test(p:parser):
@@ -481,7 +500,19 @@ class lambdef(parsenode): pass
 class star_expr(parsenode): pass
 class testlist(parsenode): pass
 
-class compound_stmt(parsenode): pass
+@withtabs
+def compound_stmt(p:parser):
+    return p.tryor(if_stmt, while_stmt, for_stmt, try_stmt, with_stmt, funcdef, classdef, decorated, async_stmt)
+
+class if_stmt(parsenode): pass
+class while_stmt(parsenode): pass
+class for_stmt(parsenode): pass
+class try_stmt(parsenode): pass
+class with_stmt(parsenode): pass
+class funcdef(parsenode): pass
+class classdef(parsenode): pass
+class decorated(parsenode): pass
+class async_stmt(parsenode): pass
 
 def main(filepath:str):
     p = parser(filepath)
