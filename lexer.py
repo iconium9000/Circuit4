@@ -199,7 +199,7 @@ class parser:
     def resetidx(self, idx:int): self.lexidx = idx
 
     def tryname(self):
-        pass
+        raise NotImplementedError('tryname')
 
     def tryops(self, *ops:str, optional:bool=False):
         idx,tok = self.getnext()
@@ -365,9 +365,28 @@ def expr_test(f:'Callable[[], tuple[Callable[[parser],parsenode],Callable[[parse
             return ret
     return _expr_test
 
+# atom ::= identifier | literal | enclosure
 @withtabs
-class atom(parsenode): pass
+def atom(p:parser): return p.tryor(identifier, literal, enclosure)
 
+@withtabs
+class identifier(parsenode):
+    def __init__(self, p:parser):
+        self.name = p.tryname()
+
+# literal ::= stringliteral | bytesliteral | integer | floatnumber | imagnumber
+#             | '...' | 'None' | 'True' | 'False'
+@withtabs
+def literal(p:parser):
+    return p.tryor()
+
+@withtabs
+class stringliteral(parsenode):
+    def __init__(self, p:parser):
+        self.strings = p.trystrings()
+
+@withtabs
+class enclosure(parsenode): pass
 @withtabs
 class arglist(parsenode): pass
 
@@ -455,20 +474,19 @@ def xor_expr(): return and_expr, tryops('^')
 @expr_test
 def expr(): return xor_expr, tryops('|')
 @expr_test
-def comparison():
-    def comparison_ops(p:parser):
-        if ret := p.tryops('<','>','==','>=','<=','<>','!=','in', optional=True):
-            return ret
-        elif ret := p.tryops('is'):
-            if p.tryops('not'):
-                return optok(ret.info, 'is not')
-            return ret
-        elif ret := p.tryops('not'):
-            if p.tryops('in'):
-                return optok(ret.info, 'not in')
-            raise p.parsefail('comparison', 'no-in-after-not')
-        raise p.parsefail('comparison', 'no-op')
-    return expr, comparison_ops
+def comparison(): return expr, comparison_ops
+def comparison_ops(p:parser):
+    if ret := p.tryops('<','>','==','>=','<=','<>','!=','in', optional=True):
+        return ret
+    elif ret := p.tryops('is'):
+        if p.tryops('not'):
+            return optok(ret.info, 'is not')
+        return ret
+    elif ret := p.tryops('not'):
+        if p.tryops('in'):
+            return optok(ret.info, 'not in')
+        raise p.parsefail('comparison', 'no-in-after-not')
+    raise p.parsefail('comparison', 'no-op')
 
 @withtabs
 def not_test(p:parser):
@@ -500,11 +518,42 @@ class lambdef(parsenode): pass
 class star_expr(parsenode): pass
 class testlist(parsenode): pass
 
+# compound_stmt ::= if_stmt | while_stmt | for_stmt | try_stmt | with_stmt | funcdef | classdef | decorated | async_stmt
 @withtabs
 def compound_stmt(p:parser):
     return p.tryor(if_stmt, while_stmt, for_stmt, try_stmt, with_stmt, funcdef, classdef, decorated, async_stmt)
 
-class if_stmt(parsenode): pass
+# if_stmt ::= 'if' namedexpr_test ':' suite elif_stmt* [else_stmt]
+@withtabs
+class if_stmt(parsenode):
+    def __init__(self, p:parser):
+        p.tryops('if')
+        self.if_test = p.tryoptional(namedexpr_test)
+        p.tryops(':')
+        self.suite = p.tryoptional(suite)
+        self.error = not (self.if_test or self.suite)
+        self.elif_stmts = p.trywhile(elif_stmt)
+        self.else_stmt = p.tryoptional(else_stmt)
+
+# elif_stmt ::= 'elif' namedexpr_test ':' suite
+@withtabs
+class elif_stmt(parsenode):
+    def __init__(self, p:parser):
+        p.tryops('elif')
+        self.if_test = p.tryoptional(namedexpr_test)
+        p.tryops(':')
+        self.suite = p.tryoptional(suite)
+        self.error = not (self.if_test or self.suite)
+
+# else_stmt ::= 'else' ':' suite
+@withtabs
+class else_stmt(parsenode):
+    def __init__(self, p:parser):
+        p.tryops('else')
+        p.tryops(':')
+        self.suite = p.tryoptional(suite)
+        self.error = not self.suite
+
 class while_stmt(parsenode): pass
 class for_stmt(parsenode): pass
 class try_stmt(parsenode): pass
@@ -513,6 +562,23 @@ class funcdef(parsenode): pass
 class classdef(parsenode): pass
 class decorated(parsenode): pass
 class async_stmt(parsenode): pass
+
+# suite ::= simple_stmt | NEWLINE INDENT stmt+ DEDENT
+class suite(parsenode): pass
+
+class namedexpr(parsenode):
+    def __init__(self, identifier:test, expr:'parsenode|None'):
+        self.identifier = identifier
+        self.expr = expr
+        self.error = not expr
+
+# namedexpr_test ::= test [':=' test]
+@withtabs
+def namedexpr_test(p:parser):
+    identifier_expr = test(p)
+    op = p.tryops(':=', optional=True)
+    if op: return namedexpr(identifier_expr, p.tryoptional(test))
+    return identifier_expr
 
 def main(filepath:str):
     p = parser(filepath)
