@@ -149,6 +149,9 @@ class parser:
         self.lexlist = list(self.lexer(filepath))
         self.lexlist_len =  len(self.lexlist)
         self.lexidx = 0
+        self.tracking = False
+        self.indentlevel = 0
+        self.indentstack:'list[int]' = []
         for lex in self.lexlist:
             print(lex)
 
@@ -156,8 +159,18 @@ class parser:
         print(tabs.now() + 'fail', *args, self.lexlist[self.lexidx])
         return parsefail(*args)
 
+    def getnext(self):
+        if (idx := self.lexidx) >= self.lexlist_len:
+            raise self.parsefail('hit-endmarker')
+        self.lexidx += 1
+        return self.lexlist[idx]
+
     def trynewline(self):
-        raise NotImplementedError('trynewline')
+        idx,tok = self.lexidx, self.getnext()
+        if not isinstance(tok, tabtok):
+            raise self.parsefail('trynewline', 'not-tabtok')
+        if tok.tabs == self.indentlevel: return
+        self.lexidx = idx
 
     def tryindent(self):
         raise NotImplementedError('tryindent')
@@ -166,25 +179,30 @@ class parser:
         raise NotImplementedError('trydedent')
 
     def trackindent(self):
-        raise NotImplementedError('trackindent')
+        self.tracking = True
     
     def ignoreindent(self):
-        raise NotImplementedError('trackindent')
+        self.tracking = False
 
     def tryendmarker(self):
         if self.lexidx < self.lexlist_len:
             raise self.parsefail('tryendmarker')
 
+    def resetidx(self, idx:int): self.lexidx = idx
+
     def tryops(self, *ops:str, optional:bool=False):
-        if self.lexidx >= self.lexlist_len:
-            raise self.parsefail('tryops', 'endmarker')
-        tok = self.lexlist[self.lexidx]
+        idx = self.lexidx
+
+        while isinstance(tok := self.getnext(), tabtok):
+            if not self.tracking:
+                if optional: return self.resetidx(idx)
+                raise self.parsefail('tryops', 'tabtok')
+            self.lexidx += 1
+
         if not isinstance(tok, optok):
             raise self.parsefail('tryops', 'not-op')
-        elif tok.op in ops:
-            self.lexidx += 1
-            return tok
-        if optional: return None
+        elif tok.op in ops: return tok
+        if optional: return self.resetidx(idx)
         raise self.parsefail('tryops', 'not-found')
 
     def trywhile(self, arg:Callable[['parser'],parsenode], min=0):
@@ -202,14 +220,14 @@ class parser:
         for arg in args:
             try: return arg(self)
             except parsefail: self.lexidx = idx
-        if optional: return None
+        if optional: return self.resetidx(idx)
         raise self.parsefail('tryor')
 
     def tryoptional(self, arg:Callable[['parser'],parsenode]):
         idx = self.lexidx
         try: return arg(self)
         except parsefail: self.lexidx = idx
-        return None
+        return self.resetidx(idx)
 
 def tryops(*args:str, optional:bool=False):
     def _tryops(p:parser):
@@ -219,6 +237,8 @@ def tryops(*args:str, optional:bool=False):
 @withtabs
 class file_input(parsenode):
     def __init__(self, p:parser):
+        p.trackindent()
+        p.trynewline()
         self.stmts = p.trywhile(stmt)
         p.tryendmarker()
 
