@@ -2,263 +2,471 @@
 import sys
 import re
 from typing import Callable, Generator
+from dataclasses import dataclass
+
+@dataclass
+class matchinfo:
+    string:str
+    filename:str
+    lidx:int
+    start:int
+    end:int
+    line:str
 
 class charlist:
 
-    def __init__(self, file:str):
-        self.idx = 0
-        self.file = file
-        self.file_len = len(file)
+    def __init__(self, filename:str, file:str):
+        self.filename = filename
+        file = '\n' + file + '\n\n\\'
+        self.fidx = 0
+        self.file = str()
+        self.lines:'list[str]' = []
+        self.lidx = 0
+
+        fidx = 0
+        self.ls_fidxs:'list[int]' = []
+        self.le_fidxs:'list[int]' = []
+        for line in file.split('\n'):
+            self.ls_fidxs.append(fidx)
+            if line and line[-1] == '\\':
+                line = line[:-1]
+                fidx += len(line)
+                tfidx = fidx
+                self.file += line
+            else:
+                tfidx = fidx + len(line)
+                self.file += line + '\n'
+                fidx = tfidx+1
+            self.le_fidxs.append(tfidx)
+            self.lines.append(line)
 
     def match(self, pattern:re.Pattern[str]):
-        m = re.match(pattern, self.file[self.idx:])
+        m = pattern.match(self.file, self.fidx)
         if not m: return None
         start,end = m.span()
-        start += self.idx
-        self.idx += end
-        return self.file[start:self.idx]
+        self.fidx = end
+        while start > self.le_fidxs[self.lidx]:
+            self.lidx += 1
+        ls_fidx = self.ls_fidxs[self.lidx]
+        string = self.file[start:end]
+        start -= ls_fidx
+        end -= ls_fidx
+        line = self.lines[self.lidx]
+        return matchinfo(string,self.filename,self.lidx,start,end,line)
 
-    def next(self):
-        if self.idx >= self.file_len:
-            raise StopIteration
-        return self.file[self.idx]
-    
-    def move(self):
-        self.idx += 1
-
-strpat = re.compile(r'\"(\\\"|[^\"])*\"')
-chrpat = re.compile(r'\'(\\\'|[^\'])*\'')
-numpat = re.compile(r'0(x|X)[0-9a-fA-F]+|0(b|B)[01]+|0[0-7]*|[0-9]+')
+nwlpat = re.compile(r'(\#[^\n]*| |\n)*\n')
+tabpat = re.compile(r' *')
+spcpat = re.compile(r' +')
 idfpat = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*')
-spcpat = re.compile(r'(\/\/[^\n]*\n|\/\*[^\*\/]*\*\/| |\t|\n)*')
-opspat = re.compile(r'volatile|unsigned|register|continue|typedef|default|'
-    r'switch|struct|static|sizeof|signed|return|extern|double|'
-    r'while|union|short|float|const|break|void|long|goto|enum|else|char|case|auto|'
-    r'int|for|if|do|'
-    r'\>\>\=|\<\<\=|\.\.\.|'
-    r'\|\||\|\=|\^\=|\>\>|\>\=|\=\=|\<\=|\<\<|'
-    r'\/\=|\-\>|\-\=|\-\-|\+\=|\+\+|\*\=|\&\=|\&\&|\%\=|\!\=|'
-    r'\~|\}|\||\{|\^|\]|\[|\?|\>|\=|\<|\;|\:|\/|\.|\-|\,|\+|\*|\)|\(|\&|\%|\!')
+numpat = re.compile(r'0(x|X)[0-9a-fA-F]+|0(b|B)[01]+|0[0-7]*|[0-9]+')
+strpat = re.compile(r'\"(\\\"|[^\"])*\"|\'(\\\'|[^\'])*\'')
+badpat = re.compile(r'.')
 
-class BadChar(Exception): pass
+opslist = (
+    '| & / { = <<= < - @= ^ } := &= '
+    '% [ ** >> >>= |= : == @ *= <> -> '
+    '%= **= ~ //= != . > -= ; , // ] '
+    '* /= ... ) ( ^= << <= >= += +'.split())
+opslist.sort(key=lambda s : len(s))
+opslist.reverse()
+opslist = ['\\' + '\\'.join(op) for op in opslist]
+opspat = re.compile('|'.join(opslist))
 
-def lexer(file:str) -> 'Generator[tuple[str,str],None,None]':
-    try:
-        chars = charlist('\n' + file.replace('\\\n','') + '\n')
-        while True:
-            if m := chars.match(strpat): yield ('str', m)
-            elif m := chars.match(chrpat): yield ('chr', m)
-            elif chars.match(spcpat): pass
-            elif m := chars.match(opspat): yield ('op', m)
-            elif m := chars.match(numpat): yield ('num', m)
-            elif m := chars.match(idfpat): yield ('idf', m)
-            else: raise KeyError(chars.next())
-    except StopIteration:
-        return
+keywords = set(
+    'def del pass break continue return raise from import '
+    'as global nonlocal assert if while lambda class '
+    'for in else elif finally with or and not None True False'.split())
+
+class tabs:
+    num = 0
+
+    @classmethod
+    def now(cls): return '|' * cls.num
+    def __init__(self, *args): self.args = args
+    def __enter__(self):
+        print(self.now() + 'tabs', *self.args)
+        tabs.num += 1
+    def __exit__(self, *args): tabs.num -= 1
+
+def withtabs(c:'Callable[[parser],parsenode]'):
+    def _withtabs(p:'parser'):
+        with tabs(c.__name__):
+            return c(p)
+    return _withtabs
 
 class parsenode:
-    
-    def __init__(self, parser:'parser'):
-        raise NotImplementedError(self.__class__.__name__)
+    def __init__(self, p:'parser'):
+        raise p.parsefail(self.__class__.__name__, NotImplemented)
 
 class parsefail(Exception): pass
 
+@dataclass
+class lextok: info:matchinfo
+
+@dataclass
+class optok(lextok): op:str
+
+@dataclass
+class inftok(lextok): name:str
+
+@dataclass
+class tabtok(lextok): tabs:int
+
+@dataclass
+class numtok(lextok): num:str
+
+@dataclass
+class strtok(lextok): string:str
+
+@dataclass
+class badtok(lextok): pass
+
 class parser:
+    @staticmethod
+    def lexer(filepath:str):
+        with open(filepath, 'r') as f:
+            file = f.read()
+        chars = charlist(filepath, file)
+        idx = -1
+        while chars.fidx > idx:
+            idx = chars.fidx
+            if m := chars.match(strpat):
+                yield strtok(m, m.string)
+            elif chars.match(nwlpat):
+                info = chars.match(tabpat)
+                yield tabtok(info, len(info.string))
+            elif chars.match(spcpat): pass
+            elif m := chars.match(idfpat):
+                tok = optok if m.string in keywords else inftok
+                yield tok(info, m.string)
+            elif m := chars.match(numpat): yield numtok(m, m.string)
+            elif m := chars.match(opspat): yield optok(m, m.string)
+            elif m := chars.match(badpat): yield badtok(m)
+            else: return
+        raise Exception('nomove')
 
-    def __init__(self, file:str):
-        self.toks = list(lexer(file))
-        self.num_toks = len(self.toks)
-        self.idx = 0
+    def __init__(self, filepath:str):
+        self.lexlist = list(self.lexer(filepath))
+        self.lexlist_len =  len(self.lexlist)
+        self.lexidx = 0
+        for lex in self.lexlist:
+            print(lex)
 
-    def __next__(self):
-        idx = self.idx
-        if self.num_toks <= idx:
-            raise StopIteration
-        self.idx += 1        
-        return self.toks[idx]
+    def parsefail(self, *args:str):
+        print(tabs.now() + 'fail', *args, self.lexlist[self.lexidx])
+        return parsefail(*args)
 
-    def identifier(self):
-        tok,val = next(self)
-        if tok == 'idf': return val
-        raise parsefail('identifier', tok, val)
-     
-    def tryops(self, *ops:str):
-        tok,val = next(self)
-        if tok == 'op' and val in ops: return val
-        raise parsefail('mchop', ops, (tok,val))
+    def trynewline(self):
+        raise NotImplementedError('trynewline')
 
-    def tryor(self, *args:Callable[['parser'],parsenode]):
-        idx = self.idx
-        fails:list[parsefail] = []
+    def tryindent(self):
+        raise NotImplementedError('tryindent')
+
+    def trydedent(self):
+        raise NotImplementedError('trydedent')
+
+    def trackindent(self):
+        raise NotImplementedError('trackindent')
+    
+    def ignoreindent(self):
+        raise NotImplementedError('trackindent')
+
+    def tryendmarker(self):
+        if self.lexidx < self.lexlist_len:
+            raise self.parsefail('tryendmarker')
+
+    def tryops(self, *ops:str, optional:bool=False):
+        if self.lexidx >= self.lexlist_len:
+            raise self.parsefail('tryops', 'endmarker')
+        tok = self.lexlist[self.lexidx]
+        if not isinstance(tok, optok):
+            raise self.parsefail('tryops', 'not-op')
+        elif tok.op in ops:
+            self.lexidx += 1
+            return tok
+        if optional: return None
+        raise self.parsefail('tryops', 'not-found')
+
+    def trywhile(self, arg:Callable[['parser'],parsenode], min=0):
+        idx = -1
+        ret:'list[parsenode]' = []
+        while idx < (idx := self.lexidx) and (argret := self.tryoptional(arg)):
+            ret.append(argret)
+        if argret: raise self.parsefail('trywhile', 'nomove')
+        elif len(ret) < min:
+            raise self.parsefail('trywhile', 'retmin', len(ret), min)
+        return ret
+
+    def tryor(self, *args:Callable[['parser'],parsenode], optional:bool=False):
+        idx = self.lexidx
         for arg in args:
-            self.idx = idx
             try: return arg(self)
-            except parsefail as e: fails.append(e)
-        raise parsefail('tryor', *fails)
-
-    def trywhile(self, arg:Callable[['parser'],parsenode], min:int=0):
-        try:
-            ret:list[parsenode] = []
-            idx = -1
-            while self.idx > idx:
-                idx = self.idx
-                ret.append(arg(self))
-            raise parsefail('trywhile', 'nomove')
-        except StopIteration:
-            if len(ret) < min:
-                raise parsefail('trywhile', 'min', len(ret), min)
-            return ret
+            except parsefail: self.lexidx = idx
+        if optional: return None
+        raise self.parsefail('tryor')
 
     def tryoptional(self, arg:Callable[['parser'],parsenode]):
-        idx = self.idx
+        idx = self.lexidx
         try: return arg(self)
-        except parsefail:
-            self.idx = idx
-            return None
+        except parsefail: self.lexidx = idx
+        return None
 
-class identifier(parsenode):
-    def __init__(self, parser:parser):
-        self.name = parser.identifier()
+def tryops(*args:str, optional:bool=False):
+    def _tryops(p:parser):
+        return p.tryops(*args, optional=optional)
+    return _tryops
 
-class translation_unit(parsenode):
-    def __init__(self, parser:parser):
-        self.args = parser.trywhile(external_declaration)
+@withtabs
+class file_input(parsenode):
+    def __init__(self, p:parser):
+        self.stmts = p.trywhile(stmt)
+        p.tryendmarker()
 
-def external_declaration(parser:parser):
-    return parser.tryor(function_definition, declaration)
+@withtabs
+def stmt(p:parser):
+    return p.tryor(simple_stmt, compound_stmt)
 
-class function_definition(parsenode):
-    def __init__(self, parser:parser):
-        self.specifiers = parser.trywhile(declaration_specifier)
-        self.declarator = declarator(parser)
-        self.declarations = parser.trywhile(declaration)
-        self.compound_statement = compound_statement(parser)
+@withtabs
+class simple_stmt(parsenode):
+    def __init__(self, p:parser):
+        self.stmts = [small_stmt(p)] + p.trywhile(post_stmt)
+        p.tryops(';', optional=True)
+        p.trynewline()
 
-def declaration_specifier(parser:parser):
-    return parser.tryor(
-        storage_class_specifier,
-        type_specifier,
-        type_qualifier
-    )
+def post_stmt(p:parser):
+    p.tryops(';')
+    s = small_stmt(p)
+    return s
 
-class storage_class_specifier(parsenode):
-    def __init__(self, parser:parser):
-        self.specifier = parser.tryops('auto','register','static','extern','typedef')
+@withtabs
+def small_stmt(p:parser):
+    return p.tryor(expr_stmt, del_stmt, pass_stmt, flow_stmt,
+            import_stmt, global_stmt, nonlocal_stmt, assert_stmt)
 
-def type_specifier(parser:parser):
-    return parser.tryor(literal_type,
-        struct_or_union_specifier,
-        enum_specifier, typedef_name)
+@withtabs
+class expr_stmt(parsenode):
+    def __init__(self, p:parser):
+        self.testlist_star_expr = testlist_star_expr(p)
+        self.annassign = p.tryoptional(annassign)
+        self.augassign_operator = p.tryoptional(augassign)
+        self.assign_list = p.trywhile(assign_list)
 
-class literal_type(parsenode):
-    def __init__(self, parser:parser):
-        self.name = parser.tryops('void','char','short','int',
-            'long','float','double','signed','unsigned')
+@withtabs
+class annassign(parsenode):
+    def __init__(self, p:parser):
+        p.tryops(':')
+        self.type = test(p)
+        self.assign = p.tryops('=', optional=True)
+        if not self.assign:
+            self.expr = None
+            self.error = False
+            return
+        self.expr = p.tryor(yield_expr, testlist_star_expr, optional=True)
+        self.error = not self.expr
 
-class struct_or_union_specifier(parsenode):
-    def __init__(self, parser:parser):
-        self.struct_or_union = parser.tryops('struct','union')
-        self.identifier = parser.tryoptional(identifier)
-        try:
-            idx = parser.idx
-            parser.tryops('{')
-            self.struct_declarations = parser.trywhile(struct_declaration, min=1)
-            parser.tryops('}')
-        except parsefail:
-            if not self.identifier:
-                raise parsefail('struct_or_union_specifier', 'neither')
-            parser.idx = idx
-            self.struct_declarations = None
+@withtabs
+class augassign(parsenode):
+    ops = '+= -= *= @= /= %= &= |= ^= <<= >>= **= //='.split()
+    def __init__(self, p:parser):
+        self.op = p.tryops(self.ops)
+        self.testlist = p.tryor(yield_expr, testlist, optional=True)
+        self.error = not self.testlist
 
-class struct_declaration(parsenode): pass
-class specifier_qualifier(parsenode): pass
-class struct_declarator_list(parsenode): pass
-class struct_declarator(parsenode): pass
+class empty_assign(parsenode):
+    def __init__(self, tok:optok): self.tok = tok
 
-class declarator(parsenode):
-    def __init__(self, parser:'parser'):
-        self.pointer = parser.tryoptional(pointer)
-        self.direct_declarator = direct_declarator(parser)
+@withtabs
+def assign_list(p:parser):
+    tok = p.tryops('=')
+    return p.tryor(yield_expr, testlist_star_expr, optional=True) or empty_assign(tok)
 
-class pointer(parsenode):
-    def __init__(self, parser:parser):
-        parser.tryops('*')
-        self.type_qualifiers = parser.trywhile(type_qualifier)
-        self.pointer = parser.tryoptional(pointer)
+class yield_from(parsenode):
+    def __init__(self, generator:'parsenode|None'):
+        self.generator = generator
+        self.error = not generator
 
-class type_qualifier(parsenode):
-    def __init__(self, parser:parser):
-        self.name = parser.tryops('const','volatile')
+class yield_arg(parsenode):
+    def __init__(self, arg:'parsenode|None'):
+        self.arg = arg
 
-class direct_declarator(parsenode): pass
-class constant_expression(parsenode): pass
-class conditional_expression(parsenode): pass
-class logical_or_expression(parsenode): pass
-class logical_and_expression(parsenode): pass
-class inclusive_or_expression(parsenode): pass
-class exclusive_or_expression(parsenode): pass
-class and_expression(parsenode): pass
-class equality_expression(parsenode): pass
-class relational_expression(parsenode): pass
-class shift_expression(parsenode): pass
-class additive_expression(parsenode): pass
-class multiplicative_expression(parsenode): pass
-class cast_expression(parsenode): pass
-class unary_expression(parsenode): pass
-class postfix_expression(parsenode): pass
-class primary_expression(parsenode): pass
-class constant(parsenode): pass
-class expression(parsenode): pass
-class assignment_expression(parsenode): pass
-class assignment_operator(parsenode): pass
-class unary_operator(parsenode): pass
-class type_name(parsenode): pass
-class parameter_type_list(parsenode): pass
-class parameter_list(parsenode): pass
-class parameter_declaration(parsenode): pass
-class abstract_declarator(parsenode): pass
-class direct_abstract_declarator(parsenode): pass
+@withtabs
+def yield_expr(p:parser):
+    p.tryops('yield')
+    if tryops('from', optional=True):
+        return yield_from(p.tryoptional(test))
+    return yield_arg(p.tryoptional(testlist_star_expr))
 
-class enum_specifier(parsenode):
-    def __init__(self, parser:parser):
-        parser.tryops('enum')
-        self.identifier = parser.tryoptional(identifier)
-        try:
-            idx = parser.idx
-            parser.tryops('{')
-            self.enumerator_list = enumerator_list(parser)
-            parser.tryops('}')
-        except parsefail:
-            if not self.identifier:
-                raise parsefail('enum_specifier', 'neigther')
-            parser.idx = idx
-            self.enumerator_list = None
+@withtabs
+class testlist_star_expr(parsenode):
+    def __init__(self, p:parser):
+        def getlist(p:parser):
+            p.tryops(',')
+            return p.tryor(test, star_expr)
+        self.list = [p.tryor(test, star_expr)] + p.trywhile(getlist)
 
-class enumerator_list(parsenode): pass
-class enumerator(parsenode): pass
-class typedef_name(identifier): pass
+class del_stmt(parsenode): pass
+class pass_stmt(parsenode): pass
+class flow_stmt(parsenode): pass
+class import_stmt(parsenode): pass
+class global_stmt(parsenode): pass
+class nonlocal_stmt(parsenode): pass
+class assert_stmt(parsenode): pass
 
-class declaration(parsenode):
-    def __init__(self, parser:parser):
-        self.declaration_specifiers = parser.trywhile(declaration_specifier, min=1)
-        self.init_declarator = parser.trywhile(init_declarator)
-        parser.tryops(';')
+class operator(parsenode):
+    def __init__(self, op:str, *args:parsenode):
+        self.op = op
+        self.args = args
 
-class init_declarator(parsenode): pass
-class initializer(parsenode): pass
-class initializer_list(parsenode): pass
-class compound_statement(parsenode): pass
-class statement(parsenode): pass
-class labeled_statement(parsenode): pass
-class expression_statement(parsenode): pass
-class selection_statement(parsenode): pass
-class iteration_statement(parsenode): pass
-class jump_statement(parsenode): pass
+def expr_test(f:'Callable[[], tuple[Callable[[parser],parsenode],Callable[[parser],str]]]'):
+    def _expr_test(p:parser):
+        subop, getop = f()
+        def _tryops(p:parser): return operator(getop(p), subop(p))
+        with tabs(f.__name__):
+            ret = subop(p)
+            for node in p.trywhile(_tryops):
+                ret = operator(node.op, ret, *node.args)
+            return ret
+    return _expr_test
+
+@withtabs
+class atom(parsenode): pass
+
+@withtabs
+class arglist(parsenode): pass
+
+@withtabs
+class call(parsenode):
+    def __init__(self, p:parser):
+        p.tryops('(')
+        p.ignoreindent()
+        self.args = p.tryoptional(arglist)
+        p.trackindent()
+        p.tryops(')')
+
+class sliceop(parsenode):
+    def __init__(self, *args:'parsenode|None'):
+        self.args = args
+
+@withtabs
+def subscript(p:parser):
+    t1 = p.tryoptional(test)
+    c1 = p.tryoptional(tryops(':'))
+    if not c1:
+        if t1: return t1
+        raise p.parsefail('subscript')
+    t2 = p.tryoptional(test)
+    c2 = p.tryoptional(tryops(':'))
+    t3 = c2 and p.tryoptional(test)
+    return sliceop(t1,t2,t3)
+
+def subscriptlist(p:parser):
+    p.tryops(',')
+    return subscript(p)
+
+@withtabs
+class subscription(parsenode):
+    def __init__(self, p:parser):
+        p.tryops('[')
+        p.ignoreindent()
+        ss = p.tryoptional(subscript)
+        self.error = not ss
+        self.args = [ss] + p.trywhile(subscriptlist)
+        p.tryops(',', optional=True)
+        p.trackindent()
+        p.tryops(']')
+
+@withtabs
+class attributeref(parsenode): pass
+
+
+def trailer(p:parser): return p.tryor(call, subscription, attributeref)
+
+@withtabs
+def atom_expr(p:parser):
+    ret = atom(p)
+    for op in p.trywhile(trailer):
+        ret = operator('trailer', ret, op)
+    return ret
+
+@withtabs
+def power(p:parser):
+    ret = atom_expr(p)
+    if p.tryops('**', optional=True):
+        return operator('**', ret, factor(p))
+
+@withtabs
+def factor(p:parser):
+    ops = p.trywhile(tryops('+','-','~'))
+    ret = power(p)
+    ops.reverse()
+    for op in ops:
+        ret = operator('factor' + op, ret)
+    return ret
+
+@expr_test
+def term(): return factor, tryops('*','@','/','%','//')
+@expr_test
+def arith_expr(): return term, tryops('+', '-')
+@expr_test
+def shift_expr(): return arith_expr, tryops('<<', '>>')
+@expr_test
+def and_expr(): return shift_expr, tryops('&')
+@expr_test
+def xor_expr(): return and_expr, tryops('^')
+@expr_test
+def expr(): return xor_expr, tryops('|')
+@expr_test
+def comparison():
+    def _tryops(p:parser):
+        if ret := p.tryops('<','>','==','>=','<=','<>','!=','in', optional=True):
+            return ret
+        elif ret := p.tryops('is'):
+            if p.tryops('not'):
+                return optok(ret.info, 'is not')
+            return ret
+        elif ret := p.tryops('not'):
+            if p.tryops('in'):
+                return optok(ret.info, 'not in')
+            raise p.parsefail('comparison', 'no-in-after-not')
+        raise p.parsefail('comparison', 'no-op')
+    return expr, _tryops
+
+@withtabs
+def not_test(p:parser):
+    oddnots = 1 & len(p.trywhile(tryops('not')))
+    _comparison = comparison(p)
+    return operator('not', _comparison) if oddnots else _comparison
+
+@expr_test
+def and_test(): return not_test, tryops('and')
+@expr_test
+def or_test(): return and_test, tryops('or')
+
+@withtabs
+def test(p:parser): return p.tryor(ternary, lambdef)
+
+@withtabs
+def ternary(p:parser):
+    _or_test = or_test(p)
+    if p.tryoptional(tryops('if')):
+        _if_test = or_test(p)
+        p.tryops('else')
+        _else_test = test(p)
+        return operator('ternary', _or_test, _if_test, _else_test)
+    else: return _or_test
+
+@withtabs
+class lambdef(parsenode): pass
+
+class star_expr(parsenode): pass
+class testlist(parsenode): pass
+
+class compound_stmt(parsenode): pass
 
 def main(filepath:str):
-    with open(filepath, 'r') as f:
-        file = f.read()
-    tree = translation_unit(parser(file))
+    p = parser(filepath)
+    try: file_input(p)
+    except parsefail: pass
 
 if __name__ == "__main__":
 

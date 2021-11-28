@@ -1,11 +1,11 @@
-vstr = 'asdf' + 'h\'appy'
-
-if 10 == 10:
+if 10 == 10: \
     asdf = 1 # this
             # 456
     asdf += 1
 else:
     asdf = -1
+
+
 print(asdf)
 newvar:tuple[
     int,float,
@@ -26,3 +26,5 @@ def tester():
     m |= 10
 
     print(foo(k, i))
+
+"fudge nuggits"

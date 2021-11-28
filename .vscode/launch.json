@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "lexer.py",
             "console": "integratedTerminal",
-            "args": ["main.c"],
+            "args": ["main.cy"],
         }
     ]
 }
