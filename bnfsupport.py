@@ -11,14 +11,4 @@ def exclusion(arg=None): pass
 def tilde(arg=None): pass
 def endswith(arg=None): pass
 def question(arg=None): pass
- 
-class ENDMARKER: pass
-class NEWLINE: pass
-class NAME: pass
-class TYPE_COMMENT: pass
-class ASYNC: pass
-class AWAIT: pass
-class INDENT: pass
-class DEDENT: pass
-class NUMBER: pass
-class STRING: pass
+def act(arg=None): pass

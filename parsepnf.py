@@ -1,4 +1,5 @@
 from cythonlexer import *
+from bnfdict import proc
 import sys
 
 class parser:
@@ -8,7 +9,18 @@ class parser:
         self.idx = 0
         self.ntabs = 0
 
-        self.bnf_dict = {}
+        self.bnf_dict = {
+            'ENDMARKER': ['act', '"ENDMARKER"'],
+            'NEWLINE': ['act', '"NEWLINE"'],
+            'NAME': ['act', '"NAME"'],
+            'TYPE_COMMENT': ['act', '"TYPE_COMMENT"'],
+            'ASYNC': ['act', '"ASYNC"'],
+            'AWAIT': ['act', '"AWAIT"'],
+            'INDENT': ['act', '"INDENT"'],
+            'DEDENT': ['act', '"DEDENT"'],
+            'NUMBER': ['act', '"NUMBER"'],
+            'STRING': ['act', '"STRING"'],
+        }
         self.stmt_stack = []
         self.stmt = []
 
@@ -268,26 +280,30 @@ def getlist(args):
         elif is0str and is1str: return f'{arg0}({arg1})', True
         return (arg0, arg1), False
 
-def recprint(args, tab=''):
-    args, isstr = getlist(args)
-    if isstr:
-        print(f'{tab}{args}')
-        return
-    assert isinstance(args[0], str)
-    if not tab: print(tab + args[0])
-    else: print(f'{tab}with {args[0]}():')
-    for arg in args[1:]:
-        recprint(arg, tab + '  ')
-
 if __name__ == '__main__':
     p = parser(sys.argv[1])
     file(p)
 
-    print('from bnfsupport import *', end='\n\n')
-    print("def invalid_double_starred_kvpairs():")
-    print("  raise NotImplementedError")
+    with open('out.py', 'w') as f:
 
-    for symbol,args in p.bnf_dict.items():
+        print('from bnfsupport import *', file=f)
+        print("def invalid_double_starred_kvpairs():", file=f)
+        print("  raise NotImplementedError", file=f)
 
-        symbol = f'def {symbol}():'
-        recprint((symbol, args))
+        def recprint(args, tab=''):
+            args, isstr = getlist(args)
+            if isstr:
+                print(f'{tab}{args}', file=f)
+                return
+            assert isinstance(args[0], str)
+            if not tab: print(tab + args[0], file=f)
+            else: print(f'{tab}with {args[0]}():', file=f)
+            for arg in args[1:]:
+                recprint(arg, tab + '  ')
+
+        for symbol,args in p.bnf_dict.items():
+
+            symbol = f'def {symbol}():'
+            recprint((symbol, args))
+
+        proc(p.bnf_dict)
