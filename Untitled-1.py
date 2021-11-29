@@ -1,13 +1,4 @@
 
-def decorator(f):
-    def wrapper(*args):
-        print('wrapper', *args)
-        return f(*args)
-    return wrapper
+a = list(range(10))
 
-@decorator
-def foo(a,b,c):
-    print(a,b,c)
-
-
-
+b = (*a,)

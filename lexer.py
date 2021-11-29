@@ -81,10 +81,10 @@ class tabs:
     num = 0
 
     @classmethod
-    def now(cls): return '  ' * cls.num
+    def now(cls): return '  ' * cls.num + ' '
     def __init__(self, *args): self.args = args
     def __enter__(self):
-        print(self.now() + 'tabs', *self.args)
+        print(self.now(), 'tabs', *self.args)
         tabs.num += 1
     def __exit__(self, *args): tabs.num -= 1
 
@@ -97,9 +97,9 @@ def withtabs(c:'Callable[[parser],parsenode]'):
 
 class parsenode:
     def __init__(self, p:'parser'):
-        raise p.parsefail(self.__class__.__name__, NotImplemented)
+        raise p.parsererror(self.__class__.__name__, NotImplemented)
 
-class parsefail(Exception): pass
+class parsererror(Exception): pass
 
 @dataclass
 class lextok: info:matchinfo
@@ -108,7 +108,7 @@ class lextok: info:matchinfo
 class optok(lextok): op:str
 
 @dataclass
-class inftok(lextok): name:str
+class idftok(lextok): name:str
 
 @dataclass
 class tabtok(lextok): tabs:int
@@ -121,6 +121,48 @@ class strtok(lextok): string:str
 
 @dataclass
 class badtok(lextok): pass
+
+class ignoreindent:
+    def __init__(self, p:'parser'):
+        self.p = p
+    def __enter__(self):
+        self.tracking = self.p.tracking
+        self.p.tracking = False
+    def __exit__(self):
+        self.p.tracking = self.tracking
+
+class trackindent:
+    def __init__(self, p:'parser'):
+        self.p = p
+    def __enter__(self):
+        self.tracking = self.p.tracking
+        self.p.tracking = True
+    def __exit__(self):
+        self.p.tracking = self.tracking
+
+class catchparsererror:
+    def __init__(self,p:'parser'):
+        self.p = p
+
+    def __enter__(self):
+        self.idx = self.p.lexidx
+        self.tracking = self.p.tracking
+        self.indentlevel = self.p.indentlevel
+        self.indentstack = *self.p.indentstack,
+        self.p.printtabs('catchparsererror', 'enter', self.idx)
+        tabs.num += 1
+
+    def __exit__(self, exception_type, exception_value, exception_traceback):
+        tabs.num -= 1
+        self.p.printtabs('catchparsererror', 'exit', end=' ')
+        if not isinstance(exception_type, parsererror): 
+            print('no-move')
+            return
+        self.p.idx = self.lexidx
+        self.p.tracking = self.tracking
+        self.p.indentlevel = self.indentlevel
+        self.p.indentstack = [*self.p.indentstack]
+        print(self.idx)
 
 class parser:
     @staticmethod
@@ -138,7 +180,7 @@ class parser:
                 yield tabtok(info, len(info.string))
             elif chars.match(spcpat): pass
             elif m := chars.match(idfpat):
-                tok = optok if m.string in keywords else inftok
+                tok = optok if m.string in keywords else idftok
                 yield tok(info, m.string)
             elif m := chars.match(numpat): yield numtok(m, m.string)
             elif m := chars.match(opspat): yield optok(m, m.string)
@@ -156,94 +198,126 @@ class parser:
         for lex in self.lexlist:
             print(lex)
 
-    def parsefail(self, *args:str):
-        return parsefail(*args)
+    def printtabs(self, *args:str, end:str='\n'):
+        print(tabs.now(), *args, self.lexlist[self.lexidx], end=end)
 
-    def getnext(self):
-        idx = self.lexidx
-        while isinstance(tok := self._getnext(), tabtok):
-            if not self.tracking:
-                return idx,None
-            self.lexidx += 1
-        return idx,tok
+    def parsererror(self, *args:str):
+        return parsererror(*args)
 
     def _getnext(self):
         if (idx := self.lexidx) >= self.lexlist_len:
-            raise self.parsefail('hit-endmarker')
+            raise self.parsererror('hit-endmarker')
         self.lexidx += 1
-        return self.lexlist[idx]
+        tok = self.lexlist[idx]
+        print(tabs.now(), '_getnext', tok)
+        return tok
+
+    def getnext(self):
+        while isinstance(tok := self._getnext(), tabtok):
+            if self.tracking: continue
+            raise self.parsererror('getnext', 'tabtok')
+        return tok
 
     def trynewline(self):
-        idx,tok = self.lexidx, self._getnext()
+        tok = self._getnext()
         if not isinstance(tok, tabtok):
-            raise self.parsefail('trynewline', 'not-tabtok')
+            raise self.parsererror('trynewline', 'not-tabtok')
         if tok.tabs == self.indentlevel: return
-        self.lexidx = idx
+        self.lexidx -= 1
 
     def tryindent(self):
-        raise NotImplementedError('tryindent')
+        tok = self._getnext()
+        if not isinstance(tok, tabtok):
+            raise self.parsererror('tryindent', 'not-tabtok')
+        assert tok.tabs > self.indentlevel, 'expected indent'
+        self.indentstack.append(self.indentlevel)
+        self.indentlevel = tok.tabs
 
     def trydedent(self):
-        raise NotImplementedError('trydedent')
-
-    def trackindent(self):
-        self.tracking = True
-    
-    def ignoreindent(self):
-        self.tracking = False
+        tok = self._getnext()
+        if not isinstance(tok, tabtok):
+            raise self.parsererror('trydedent', 'not-tabtok')
+        if tok.tabs >= self.indentlevel:
+            raise self.parsererror('trydedent', 'wrong-direction')
+        if not self.indentstack:
+            raise self.parsererror('trydedent', 'left-justified')
+        self.indentlevel = self.indentstack.pop()
+        if self.indentlevel > tok.tabs:
+            self.lexidx -= 1
 
     def tryendmarker(self):
         if self.lexidx < self.lexlist_len:
-            raise self.parsefail('tryendmarker')
+            raise self.parsererror('tryendmarker')
 
-    def resetidx(self, idx:int): self.lexidx = idx
+    def tryidentifier(self):
+        if isinstance(tok := self.getnext(), idftok):
+            return tok
+        raise self.parsererror('tryidentifier', 'not-found')
 
-    def tryname(self):
-        raise NotImplementedError('tryname')
+    def trystrings(self):
+        strings:'list[strtok]' = []
+        idx = -1
+        while idx < (idx := self.lexidx):
+            try:
+                with catchparsererror(self):
+                    tok = self.getnext()
+                    if not isinstance(tok, strtok):
+                        raise self.parsererror('trystrings', 'not-strtok')
+                    strings.append(tok)
+            except parsererror:
+                if strings: return strings
+                else: break
+        raise self.parsererror('trystrings', 'no-move')
+
+    def tryinteger(self):
+        if isinstance(tok := self.getnext(), idftok):
+            return tok
+        return self.parsererror('tryinteger', 'not-found')
 
     def tryops(self, *ops:str, optional:bool=False):
-        idx,tok = self.getnext()
-        if tok is None: return self.resetidx(idx)
-        if not isinstance(tok, optok):
-            raise self.parsefail('tryops', 'not-op')
-        elif tok.op in ops: return tok
-        if optional: return self.resetidx(idx)
-        raise self.parsefail('tryops', 'not-found', ops)
+        try:
+            with catchparsererror(self):
+                tok = self.getnext()
+                if not isinstance(tok, optok):
+                    raise self.parsererror('not-op')
+                elif tok.op in ops: return tok
+                raise self.parsererror('not-optok')
+        except parsererror as s:
+            if optional: return None
+            raise self.parsererror('tryops', 'not-found', s, ops)
 
     def trywhile(self, arg:Callable[['parser'],parsenode], min=0):
-        idx = -1
         ret:'list[parsenode]' = []
         try:
+            idx = -1
             while idx < (idx := self.lexidx):
-                ret.append(arg(self))
-            nomove = True
-        except parsefail as fargs:
-            self.resetidx(idx)
-            print(tabs.now() + 'trywhile', 'catch', fargs, self.lexlist[self.lexidx])
-            nomove = False
-        if nomove: raise self.parsefail('trywhile', 'nomove', arg.__name__)
-        elif len(ret) < min:
-            raise self.parsefail('trywhile', 'retmin', len(ret), min)
-        return ret
+                with catchparsererror(self):
+                    argret = arg(self)
+                ret.append(argret)
+        except parsererror as fargs:
+            self.printtabs('trywhile', 'catch', fargs)
+            if len(ret) >= min: return ret
+            raise self.parsererror('trywhile', 'retmin', len(ret), min)
+        raise self.parsererror('trywhile', 'nomove', arg.__name__)
 
     def tryor(self, *args:Callable[['parser'],parsenode], optional:bool=False):
-        idx = self.lexidx
         with tabs('tryor', [arg.__name__ for arg in args]):
             for arg in args:
-                try: return arg(self)
-                except parsefail as fargs:
-                    self.resetidx(idx)
-                    print(tabs.now() + 'tryor', 'catch', fargs, self.lexlist[self.lexidx])
-            if optional: return self.resetidx(idx)
-            raise self.parsefail('tryor', 'no-match', *(arg.__name__ for arg in args))
+                try:
+                    with catchparsererror(self):
+                        return arg(self)
+                except parsererror as fargs:
+                    self.printtabs('tryor', 'catch', fargs)
+            if optional: return None
+            raise self.parsererror('tryor', 'no-match', *(arg.__name__ for arg in args))
 
     def tryoptional(self, arg:Callable[['parser'],parsenode]):
-        idx = self.lexidx
-        try: return arg(self)
-        except parsefail as fargs:
-            self.lexidx = idx
-            print(tabs.now() + 'tryoptional', 'catch', fargs, self.lexlist[self.lexidx])
-        return self.resetidx(idx)
+        try:
+            with catchparsererror(self):
+                return arg(self)
+        except parsererror as fargs:
+            self.printtabs('tryoptional', 'catch', fargs)
+        return None
 
 def tryops(*args:str, optional:bool=False):
     def _tryops(p:parser):
@@ -253,10 +327,10 @@ def tryops(*args:str, optional:bool=False):
 @withtabs
 class file_input(parsenode):
     def __init__(self, p:parser):
-        p.trackindent()
-        p.trynewline()
-        self.stmts = p.trywhile(stmt)
-        p.tryendmarker()
+        with trackindent(p):
+            p.trynewline()
+            self.stmts = p.trywhile(stmt)
+            p.tryendmarker()
 
 @withtabs
 def stmt(p:parser):
@@ -295,10 +369,9 @@ class annassign(parsenode):
         self.assign = p.tryops('=', optional=True)
         if not self.assign:
             self.expr = None
-            self.error = False
             return
         self.expr = p.tryor(yield_expr, testlist_star_expr, optional=True)
-        self.error = not self.expr
+        assert self.expr
 
 @withtabs
 class augassign(parsenode):
@@ -306,7 +379,7 @@ class augassign(parsenode):
     def __init__(self, p:parser):
         self.op = p.tryops(self.ops)
         self.testlist = p.tryor(yield_expr, testlist, optional=True)
-        self.error = not self.testlist
+        assert self.testlist
 
 class empty_assign(parsenode):
     def __init__(self, tok:optok): self.tok = tok
@@ -319,7 +392,7 @@ def assign_list(p:parser):
 class yield_from(parsenode):
     def __init__(self, generator:'parsenode|None'):
         self.generator = generator
-        self.error = not generator
+        assert generator
 
 class yield_arg(parsenode):
     def __init__(self, arg:'parsenode|None'):
@@ -352,7 +425,7 @@ class operator(parsenode):
     def __init__(self, op:str, *args:'parsenode|None'):
         self.op = op
         self.args = args
-        self.error = args.count(None) > 0
+        assert args.count(None) == 0
 
 def expr_test(f:'Callable[[], tuple[Callable[[parser],parsenode],Callable[[parser],str]]]'):
     def _expr_test(p:parser):
@@ -372,18 +445,42 @@ def atom(p:parser): return p.tryor(identifier, literal, enclosure)
 @withtabs
 class identifier(parsenode):
     def __init__(self, p:parser):
-        self.name = p.tryname()
+        self.name = p.tryidentifier()
 
 # literal ::= stringliteral | bytesliteral | integer | floatnumber | imagnumber
 #             | '...' | 'None' | 'True' | 'False'
 @withtabs
 def literal(p:parser):
-    return p.tryor()
+    return p.tryor(stringliteral, bytesliteral, integer,
+        boolliteral, floatnumber, imagnumber, ellipsis_op)
 
 @withtabs
 class stringliteral(parsenode):
     def __init__(self, p:parser):
         self.strings = p.trystrings()
+
+@withtabs
+class integer(parsenode):
+    def __init__(self, p:parser):
+        self.num = p.tryinteger()
+
+@withtabs
+class boolliteral(parsenode):
+    def __init__(self, p:parser):
+        tfn = p.tryops('True', 'False', 'None')
+        if tfn == 'True': self.value = True
+        elif tfn == 'False': self.value = False
+        else: self.value = None
+
+class bytesliteral(parsenode): pass
+class floatnumber(parsenode): pass
+class imagnumber(parsenode): pass
+
+@withtabs
+class ellipsis_op(parsenode):
+    def __init__(self, p:parser):
+        p.tryops('...')
+        self.ellipsis = True
 
 @withtabs
 class enclosure(parsenode): pass
@@ -394,9 +491,8 @@ class arglist(parsenode): pass
 class call(parsenode):
     def __init__(self, p:parser):
         p.tryops('(')
-        p.ignoreindent()
-        self.args = p.tryoptional(arglist)
-        p.trackindent()
+        with ignoreindent(p):
+            self.args = p.tryoptional(arglist)
         p.tryops(')')
 
 class sliceop(parsenode):
@@ -409,7 +505,7 @@ def subscript(p:parser):
     c1 = p.tryoptional(tryops(':'))
     if not c1:
         if t1: return t1
-        raise p.parsefail('subscript')
+        raise p.parsererror('subscript')
     t2 = p.tryoptional(test)
     c2 = p.tryoptional(tryops(':'))
     t3 = c2 and p.tryoptional(test)
@@ -423,19 +519,18 @@ def subscriptlist(p:parser):
 class subscription(parsenode):
     def __init__(self, p:parser):
         p.tryops('[')
-        p.ignoreindent()
-        ss = p.tryoptional(subscript)
-        self.error = not ss
-        self.args = [ss] + p.trywhile(subscriptlist)
-        p.tryops(',', optional=True)
-        p.trackindent()
+        with ignoreindent(p):
+            ss = p.tryoptional(subscript)
+            assert ss
+            self.args = [ss] + p.trywhile(subscriptlist)
+            p.tryops(',', optional=True)
         p.tryops(']')
 
 @withtabs
 class attributeref(parsenode):
     def __init__(self, p:parser):
         p.tryops('.')
-        self.name = p.tryname()
+        self.name = p.tryidentifier()
 
 def trailer(p:parser): return p.tryor(call, subscription, attributeref)
 
@@ -485,8 +580,8 @@ def comparison_ops(p:parser):
     elif ret := p.tryops('not'):
         if p.tryops('in'):
             return optok(ret.info, 'not in')
-        raise p.parsefail('comparison', 'no-in-after-not')
-    raise p.parsefail('comparison', 'no-op')
+        raise p.parsererror('comparison', 'no-in-after-not')
+    raise p.parsererror('comparison', 'no-op')
 
 @withtabs
 def not_test(p:parser):
@@ -531,7 +626,7 @@ class if_stmt(parsenode):
         self.if_test = p.tryoptional(namedexpr_test)
         p.tryops(':')
         self.suite = p.tryoptional(suite)
-        self.error = not (self.if_test or self.suite)
+        assert self.if_test or self.suite
         self.elif_stmts = p.trywhile(elif_stmt)
         self.else_stmt = p.tryoptional(else_stmt)
 
@@ -543,7 +638,7 @@ class elif_stmt(parsenode):
         self.if_test = p.tryoptional(namedexpr_test)
         p.tryops(':')
         self.suite = p.tryoptional(suite)
-        self.error = not (self.if_test or self.suite)
+        assert self.if_test or self.suite
 
 # else_stmt ::= 'else' ':' suite
 @withtabs
@@ -552,7 +647,7 @@ class else_stmt(parsenode):
         p.tryops('else')
         p.tryops(':')
         self.suite = p.tryoptional(suite)
-        self.error = not self.suite
+        assert self.suite
 
 class while_stmt(parsenode): pass
 class for_stmt(parsenode): pass
@@ -570,7 +665,7 @@ class namedexpr(parsenode):
     def __init__(self, identifier:test, expr:'parsenode|None'):
         self.identifier = identifier
         self.expr = expr
-        self.error = not expr
+        assert expr
 
 # namedexpr_test ::= test [':=' test]
 @withtabs
@@ -582,8 +677,15 @@ def namedexpr_test(p:parser):
 
 def main(filepath:str):
     p = parser(filepath)
-    try: file_input(p)
-    except parsefail: pass
+    try:
+        with catchparsererror(p):
+            file_input(p)
+    except parsererror as e:
+        p.printtabs(e)
+    except NotImplementedError as e:
+        print('NotImplementedError', e)
+    except AssertionError as e:
+        print('AssertionError', e)
 
 if __name__ == "__main__":
 
