@@ -132,7 +132,7 @@ class statement(statebox):
 
 class compound_stmt(statebox):
     def lextok(self):
-        self.push_stack('or')
+        self.push_stack('tryor')
         while tok := self.gettabtok():
             if tok.tabs == 0: return
             self.p.next()
@@ -144,7 +144,7 @@ class compound_stmt(statebox):
 class simple_stmt(statebox):
     def lextok(self):
 
-        self.push_stack('or')
+        self.push_stack('tryor')
         self.push_stack('lst')
         try:
             while not isinstance(tok := self.p.tok(), (tabtok, endtok, badtok)):
@@ -165,10 +165,10 @@ class atom(statebox):
         self.push(('idf', t.name))
         self.p.next()
     def numtok(self, t:numtok):
-        self.push(('num', t.name))
+        self.push(('num', t.num))
         self.p.next()
     def strtok(self, t:strtok):
-        self.push(('op', t.string))
+        self.push((f'op', t.string))
         self.p.next()
 
 class endswith(statebox):
@@ -264,17 +264,18 @@ def getlist(args):
     elif len(args) == 2:
         arg0, is0str = getlist(args[0])
         arg1, is1str = getlist(args[1])
-        if args[0] in ('or','lst'): return arg1, is1str
-        elif is0str and is1str: return arg0 + ' ' + arg1, True
+        if args[0] in ('tryor','lst'): return arg1, is1str
+        elif is0str and is1str: return f'{arg0}({arg1})', True
         return (arg0, arg1), False
 
 def recprint(args, tab=''):
-    assert isinstance(args[0], str)
     args, isstr = getlist(args)
     if isstr:
-        print(tab + args)
+        print(f'{tab}{args}')
         return
-    recprint(args[0], tab)
+    assert isinstance(args[0], str)
+    if not tab: print(tab + args[0])
+    else: print(f'{tab}with {args[0]}():')
     for arg in args[1:]:
         recprint(arg, tab + '  ')
 
@@ -282,7 +283,11 @@ if __name__ == '__main__':
     p = parser(sys.argv[1])
     file(p)
 
+    print('from bnfsupport import *', end='\n\n')
+    print("def invalid_double_starred_kvpairs():")
+    print("  raise NotImplementedError")
+
     for symbol,args in p.bnf_dict.items():
 
-        symbol = f'def {symbol}'
+        symbol = f'def {symbol}():'
         recprint((symbol, args))
