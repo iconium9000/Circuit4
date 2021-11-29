@@ -1,5 +1,5 @@
 from cythonlexer import optok
-from cythonparser import parser, trackindent, ignoreindent, withtabs, parsenode, tabs
+from cythonparser import parser, trackindent, ignoreindent, withtabs, parsenode, tabs, parsererror
 from typing import Callable, Generator
 
 def tryops(*args:str, optional:bool=False):
@@ -113,10 +113,12 @@ class operator(parsenode):
 def expr_test(f:'Callable[[], tuple[Callable[[parser],parsenode],Callable[[parser],str]]]'):
     def _expr_test(p:parser):
         subop, getop = f()
-        def _tryops(p:parser): return operator(getop(p), subop(p))
-        with tabs(p, f):
+        def expr_test_ops(p:parser):
+            with tabs(p, f.__name__, 'ops'):
+                return operator(getop(p), subop(p))
+        with tabs(p, f.__name__):
             ret = subop(p)
-            for node in p.trywhile(_tryops):
+            for node in p.trywhile(expr_test_ops):
                 ret = operator(node.op, ret, *node.args)
             return ret
     return _expr_test
@@ -188,7 +190,7 @@ def subscript(p:parser):
     c1 = p.tryoptional(tryops(':'))
     if not c1:
         if t1: return t1
-        raise p.parsererror('subscript')
+        raise parsererror('subscript')
     t2 = p.tryoptional(test)
     c2 = p.tryoptional(tryops(':'))
     t3 = c2 and p.tryoptional(test)
@@ -215,6 +217,7 @@ class attributeref(parsenode):
         p.tryops('.')
         self.name = p.tryidentifier()
 
+@withtabs
 def trailer(p:parser): return p.tryor(call, subscription, attributeref)
 
 @withtabs
@@ -263,8 +266,8 @@ def comparison_ops(p:parser):
     elif ret := p.tryops('not'):
         if p.tryops('in'):
             return optok(ret.info, 'not in')
-        raise p.parsererror('comparison', 'no-in-after-not')
-    raise p.parsererror('comparison', 'no-op')
+        raise parsererror('comparison', 'no-in-after-not')
+    raise parsererror('comparison', 'no-op')
 
 @withtabs
 def not_test(p:parser):

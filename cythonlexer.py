@@ -34,28 +34,50 @@ class matchinfo:
     start:int
     end:int
     line:str
-@dataclass
-class lextok: info:matchinfo
+
+    def __str__(self):
+        return f'{self.lidx}:{self.start}:{self.end}'
 
 @dataclass
-class optok(lextok): op:str
+class lextok:
+    info:matchinfo
 
 @dataclass
-class idftok(lextok): name:str
+class optok(lextok):
+    op:str
+    def __str__(self):
+        return str(('op', self.op, str(self.info)))
 
 @dataclass
-class tabtok(lextok): tabs:int
+class idftok(lextok):
+    name:str
+    def __str__(self):
+        return str(('name', self.name, str(self.info)))
 
 @dataclass
-class numtok(lextok): num:str
+class tabtok(lextok):
+    tabs:int
+    def __str__(self):
+        return str(('tabs', self.tabs, str(self.info)))
 
 @dataclass
-class strtok(lextok): string:str
+class numtok(lextok):
+    num:str
+    def __str__(self):
+        return str(('num', self.num, str(self.info)))
 
 @dataclass
-class badtok(lextok): pass
+class strtok(lextok):
+    string:str
+    def __str__(self):
+        return str(('str', self.string, str(self.info)))
 
-class lexer:
+@dataclass
+class badtok(lextok):
+    def __str__(self):
+        return str(('bad', str(self.info)))
+
+class charlist:
 
     def __init__(self, filename:str):
         with open(filename, 'r') as f:
@@ -98,23 +120,22 @@ class lexer:
         line = self.lines[self.lidx]
         return matchinfo(string,self.filename,self.lidx,start,end,line)
 
-    def __new__(cls, filename:str):
-        chars = super().__new__(cls)
-        cls.__init__(chars, filename)
-        idx = -1
-        while chars.fidx > idx:
-            idx = chars.fidx
-            if m := chars.match(strpat):
-                yield strtok(m, m.string)
-            elif chars.match(nwlpat):
-                info = chars.match(tabpat)
-                yield tabtok(info, len(info.string))
-            elif chars.match(spcpat): pass
-            elif m := chars.match(idfpat):
-                tok = optok if m.string in keywords else idftok
-                yield tok(info, m.string)
-            elif m := chars.match(numpat): yield numtok(m, m.string)
-            elif m := chars.match(opspat): yield optok(m, m.string)
-            elif m := chars.match(badpat): yield badtok(m)
-            else: return
-        raise Exception('nomove')
+def lexer(filename:str):
+    chars = charlist(filename)
+    idx = -1
+    while chars.fidx > idx:
+        idx = chars.fidx
+        if info := chars.match(strpat):
+            yield strtok(info, info.string)
+        elif chars.match(nwlpat):
+            info = chars.match(tabpat)
+            yield tabtok(info, len(info.string))
+        elif chars.match(spcpat): pass
+        elif info := chars.match(idfpat):
+            tok = optok if info.string in keywords else idftok
+            yield tok(info, info.string)
+        elif info := chars.match(numpat): yield numtok(info, info.string)
+        elif info := chars.match(opspat): yield optok(info, info.string)
+        elif info := chars.match(badpat): yield badtok(info)
+        else: return
+    raise Exception('nomove')
