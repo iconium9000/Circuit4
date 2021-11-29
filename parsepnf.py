@@ -306,4 +306,4 @@ if __name__ == '__main__':
             symbol = f'def {symbol}():'
             recprint((symbol, args))
 
-        proc(p.bnf_dict)
+        proc(p.bnf_dict, 'file')
