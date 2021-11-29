@@ -94,8 +94,8 @@ class statebox:
     def pop_stmt(self):
         return self.p.stmt.pop()
 
-    def push(self, *args):
-        self.p.stmt.append(args)
+    def push(self, arg):
+        self.p.stmt.append(arg)
 
     def pop(self):
         return self.p.stmt.pop()
@@ -158,28 +158,17 @@ class simple_stmt(statebox):
 class atom(statebox):
     def optok(self, t:optok):
         self.p.next()
-        try:
-            if t.op == '(': return group_stmt(p)
-            elif t.op == '[': return optional_stmt(p)
-            elif t.op == '!': return exclusion(p)
-            elif t.op == '&': return endswith(p)
-            elif t.op == '?': return question(p)
-            elif t.op == '*': return rep0(p)
-            elif t.op == '+': return rep1(p)
-            elif t.op == '|': return or_stmt(p)
-            elif t.op == '.': return dot_stmt(p)
-            elif t.op == '~': return tilde_stmt(p)
+        try: stmt_map[t.op](p)
         except parsererror as e:
             raise parserfail(e)
-        raise NotImplementedError()
     def idftok(self, t:idftok):
-        self.push('idf', t.name)
+        self.push(('idf', t.name))
         self.p.next()
     def numtok(self, t:numtok):
-        self.push('num', t.name)
+        self.push(('num', t.name))
         self.p.next()
     def strtok(self, t:strtok):
-        self.push('op', t.string)
+        self.push(('op', t.string))
         self.p.next()
 
 class endswith(statebox):
@@ -190,15 +179,15 @@ class endswith(statebox):
 
 class question(statebox):
     def lextok(self):
-        self.push('question', self.pop())
+        self.push(('question', self.pop()))
 
 class rep0(statebox):
     def lextok(self):
-        self.push('rep0', self.pop())
+        self.push(('rep0', self.pop()))
 
 class rep1(statebox):
     def lextok(self):
-        self.push('rep1', self.pop())
+        self.push(('rep1', self.pop()))
 
 class or_stmt(statebox):
     def lextok(self):
@@ -249,18 +238,38 @@ class tilde_stmt(statebox):
         try: atom(self.p)
         finally:
             self.pop_stack()
+
+stmt_map = {
+    '(': group_stmt,
+    '[': optional_stmt,
+    '!': exclusion,
+    '&': endswith,
+    '?': question,
+    '*': rep0,
+    '+': rep1,
+    '|': or_stmt,
+    '.': dot_stmt,
+    '~': tilde_stmt,
+}
+
 def getlist(args):
-    if isinstance(args, str): return args, True
-    elif not args: return '', True
-    elif len(args) == 1: return getlist(args[0])
-    elif len(args) > 2: return [getlist(arg)[0] for arg in args], False
-    arg0, is0str = getlist(args[0])
-    arg1, is1str = getlist(args[1])
-    if args[0] in ('or','lst'): return arg1, is1str
-    elif is0str and is1str: return arg0 + ' ' + arg1, True
-    return (arg0, arg1), False
+    if isinstance(args, str):
+        return args, True
+    elif not args:
+        return '', True
+    elif len(args) == 1:
+        return getlist(args[0])
+    elif len(args) > 2:
+        return [getlist(arg)[0] for arg in args], False
+    elif len(args) == 2:
+        arg0, is0str = getlist(args[0])
+        arg1, is1str = getlist(args[1])
+        if args[0] in ('or','lst'): return arg1, is1str
+        elif is0str and is1str: return arg0 + ' ' + arg1, True
+        return (arg0, arg1), False
 
 def recprint(args, tab=''):
+    assert isinstance(args[0], str)
     args, isstr = getlist(args)
     if isstr:
         print(tab + args)
@@ -273,5 +282,7 @@ if __name__ == '__main__':
     p = parser(sys.argv[1])
     file(p)
 
-    for symbol in p.bnf_dict.items():
-        recprint(symbol)
+    for symbol,args in p.bnf_dict.items():
+
+        symbol = f'def {symbol}'
+        recprint((symbol, args))
