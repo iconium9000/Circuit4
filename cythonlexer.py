@@ -12,7 +12,7 @@ strpat = re.compile(r'\"(\\\"|[^\"])*\"|\'(\\\'|[^\'])*\'')
 badpat = re.compile(r'.')
 
 opslist = (
-    '| & / { = <<= < - @= ^ } := &= '
+    '! ? | & / { = <<= < - @= ^ } := &= '
     '% [ ** >> >>= |= : == @ *= <> -> '
     '%= **= ~ //= != . > -= ; , // ] '
     '* /= ... ) ( ^= << <= >= += +'.split())
@@ -71,6 +71,11 @@ class strtok(lextok):
     string:str
     def __str__(self):
         return str(('str', self.string, str(self.info)))
+
+@dataclass
+class endtok(lextok):
+    def __str__(self):
+        return str(('end', str(self.info)))
 
 @dataclass
 class badtok(lextok):
@@ -137,5 +142,8 @@ def lexer(filename:str):
         elif info := chars.match(numpat): yield numtok(info, info.string)
         elif info := chars.match(opspat): yield optok(info, info.string)
         elif info := chars.match(badpat): yield badtok(info)
-        else: return
+        else:
+            yield endtok(matchinfo('',filename,chars.lidx,0,0,''))
+            return
+
     raise Exception('nomove')
