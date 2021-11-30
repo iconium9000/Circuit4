@@ -1,42 +1,110 @@
 # lexfuns.py
 from os import stat
 from cythonparser import *
+from out import expression
 from parsepnf import parsererror
 
 class file(statebox):
     def lextok(self) -> 'parsernode|None':
-        tok = self.gettok()
-        if isinstance(tok, endtok): return
-        elif isinstance(tok, tabtok):
-            self.optional(statements)
-            assert self.gettabtok()
-            self.next()
+        if tok := self.gettabtok():
+            self.p.indent = tok.tabs
+            r = statements(self.p)
             assert self.getendtok()
+            return r
 
 class statements(statebox):
+
+    @dataclass
     class node(parsernode):
-        def __init__(self, *args:parsernode):
-            self.args = args
+        args:'list[parsernode]'
+
+    def getstmts(self):
+        while r := statement(self.p):
+            yield r
+            if self.gettabtok(): return
+
     def lextok(self):
-        return self.node(*self.rep1(statement))
+        args = list(self.getstmts())
+        if args: return self.node(args)
 
 class statement(statebox):
     def lextok(self) -> 'parsernode|None':
-        while self.gettabtok(): self.next()
-        return compound_stmt(self.p) or simple_stmts(self.p)
+        if (tok := self.gettabtok()) and tok.tabs == self.p.indent:
+            self.next()
+            return compound_stmt(self.p) or simple_stmts(self.p)
 
-class simple_stmts(statebox):
-    def lextok(self):
-        return None
+class vardef(statebox):
+    def lextok(self) -> 'parsernode|None':
+        if not (name := self.getidftok()): return
+        if not (op := self.getoptok(':')): return
+        if not (r := expression(self.p)): return
+
+class assignment(statebox):
+    def lextok(self) -> 'parsernode|None':
+        pass
+        
+class star_expressions(statebox): pass
+class return_stmt(statebox): pass
+class import_stmt(statebox): pass
+class raise_stmt(statebox): pass
+class del_stmt(statebox): pass
+class yield_stmt(statebox): pass
+class assert_stmt(statebox): pass
+class global_stmt(statebox): pass
+class nonlocal_stmt(statebox): pass
+class pass_stmt(statebox): pass
+class break_stmt(statebox): pass
+class continue_stmt(statebox): pass
 
 class simple_stmt(statebox):
-    ops = {'return', 'import', 'raise', 'pass', 'del',
-        'yield', 'assert', 'break','continue',
-        'global', 'nonlocal', '*', '-', '+', '~'}
+    ops = {
+        'return': return_stmt,
+        'import': import_stmt,
+        'raise': raise_stmt,
+        'pass': pass_stmt,
+        'del': del_stmt,
+        'yield': yield_stmt,
+        'assert': assert_stmt,
+        'break': break_stmt,
+        'continue': continue_stmt,
+        'global': global_stmt,
+        'nonlocal': nonlocal_stmt
+    }
 
-class list_listcomp(statebox): pass
-class tuple_group_genexp(statebox): pass
-class dict_set_dictcomp_setcomp(statebox): pass
+    def lextok(self) -> 'parsernode|None':
+        if tok := self.getoptok(self.ops):
+            return self.ops[tok.op](self.p)
+        return assignment(self.p) or star_expressions(self.p)
+
+class simple_stmts(statebox):
+
+    @dataclass
+    class node(parsernode):
+        args:'list[parsernode]'
+
+    def getstmts(self):
+        while r := simple_stmt(self.p):
+            yield r
+            if self.getoptok(';'): self.next()
+            else: break
+        assert self.gettabtok(); return
+
+    def lextok(self):
+        assert (args := list(*self.getstmts()))
+        return self.node(args)
+
+class list_listcomp(statebox):
+    tracking = False
+    def lextok(self) -> 'parsernode|None':
+        raise NotImplementedError
+class tuple_group_genexp(statebox):
+    tracking = False
+    def lextok(self) -> 'parsernode|None':
+        raise NotImplementedError
+class dict_set_dictcomp_setcomp(statebox):
+    tracking = False
+    def lextok(self) -> 'parsernode|None':
+        raise NotImplementedError
 
 class strings(statebox):
     @dataclass
@@ -82,6 +150,8 @@ class atom(statebox):
         elif r := strings(self.p): return r
 
 class genexp(statebox):
+    tracking = False
+
     def lextok(self) -> 'parsernode|None':
         return None # TODO
 
@@ -136,6 +206,7 @@ class kwarg_or_double_starred(statebox):
             return self.node(op, r)
 
 class arguments(statebox):
+    tracking = False
 
     @dataclass
     class node(parsernode):
@@ -179,6 +250,7 @@ class slice(statebox):
             return self.node(opA, opB, a, b, c)
 
 class slices(statebox):
+    tracking = False
 
     @dataclass
     class node(parsernode):
@@ -196,7 +268,8 @@ class slices(statebox):
     def lextok(self) -> 'parsernode|None':
         if op := self.getoptok('['):
             self.next()
-            return self.node(op, list(self.getslices()))
+            r = self.node(op, list(self.getslices()))
+            return r
 
 class primary(statebox):
 
@@ -466,6 +539,17 @@ class named_expression(statebox):
 
 class block(statebox):
     def lextok(self) -> 'parsernode|None':
+        tok = self.gettok()
+        if isinstance(tok, tabtok):
+            assert tok.tabs > self.p.indent
+            indent = self.p.indent
+            self.p.indent = tok.tabs
+            assert (r := statements(self.p))
+            assert (tok := self.gettabtok())
+            assert self.p.indent > tok.tabs
+            assert indent >= tok.tabs
+            if indent == tok.tabs: self.next()
+            return r
         raise NotImplementedError
 
 class function_def(statebox): pass
@@ -483,30 +567,28 @@ class if_stmt(statebox):
         op:optok
         r:parsernode
 
-    @dataclass
     class ifnode(parsernode):
-        op:optok
-        if_test:parsernode
-        nodes:'tuple[parsernode, ...]'
+        def __init__(self, op:optok, if_test:parsernode, *nodes:parsernode):
+            self.op = op
+            self.if_test = if_test
+            self.nodes = nodes
 
-    def getelifs(self):
+    def getelifs_else(self):
         while op := self.getoptok('elif'):
-            assert (a := named_expression(self.p))
+            self.next(); assert (a := named_expression(self.p))
             assert self.getoptok(':'); self.next()
             yield self.elifnode(op, a, block(self.p, parserfail))
-
-    def getelse(self):
         if op := self.getoptok('else'):
+            self.next()
             assert self.getoptok(':'); self.next()
             yield self.elsenode(op, block(self.p, parserfail))
 
     def lextok(self):
         if tok := self.getoptok('if'):
-            self.next()
-            a = named_expression(self.p, parserfail)
+            self.next(); a = named_expression(self.p, parserfail)
             assert self.getoptok(':'); self.next()
             b = block(self.p, parserfail)
-            return self.ifnode(tok, a, b, *self.getelifs, *self.getelse)
+            return self.ifnode(tok, a, b, *self.getelifs_else)
 
 class class_stmt(statebox): pass
 class with_stmt(statebox): pass

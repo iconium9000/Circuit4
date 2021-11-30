@@ -13,8 +13,11 @@ class parser:
         self.ntoks = len(self.toks)
         self.ntabs = 0
         self.idx = 0
+        self.indent = 0
+        self.tracking = True
 
 class statebox:
+    tracking = True
 
     def __init__(self, p:parser): self.p = p
     def __new__(cls, p:parser, err:'type[Exception]|None'=None):
@@ -22,40 +25,52 @@ class statebox:
         idx = self.p.idx
         ntabs = self.p.ntabs
         self.p.ntabs += 1
+        tracking = self.p.tracking
+        if not cls.tracking:
+            self.p.tracking = False
         try: r = self.lextok()
         finally: self.p.ntabs = ntabs
+        if not cls.tracking:
+            self.p.tracking = tracking
         if r: return r
         elif err: raise err
         self.p.idx = idx
 
     def gettok(self): return self.p.toks[self.p.idx]
     
-    def next(self): self.p.idx += 1
+    def next(self):
+        self.p.idx += 1
+        if self.p.tracking: return
+        tok = self.p.toks[self.p.idx]
+        if isinstance(tok, tabtok):
+            self.p.idx += 1
 
     def lextok(self) -> 'parsernode|None':
         raise NotImplementedError
 
     def getoptok(self, *ops:str):
-        if isinstance(tok := self.gettok(), optok):
-            if not ops or tok.op in ops: return tok
+        tok = self.p.toks[self.p.idx]
+        if isinstance(tok, optok):
+            if not ops or tok.op in ops:
+                return tok
     def getidftok(self):
-        if isinstance(tok := self.gettok(), idftok):
-            return tok
+        tok = self.p.toks[self.p.idx]
+        if isinstance(tok, idftok): return tok
     def gettabtok(self):
-        if isinstance(tok := self.gettok(), tabtok):
-            return tok
+        tok = self.p.toks[self.p.idx]
+        if isinstance(tok, tabtok): return tok
     def getnumtok(self):
-        if isinstance(tok := self.gettok(), numtok):
-            return tok
+        tok = self.p.toks[self.p.idx]
+        if isinstance(tok, numtok): return tok
     def getstrtok(self):
-        if isinstance(tok := self.gettok(), strtok):
-            return tok
+        tok = self.p.toks[self.p.idx]
+        if isinstance(tok, strtok): return tok
     def getbadtok(self):
-        if isinstance(tok := self.gettok(), badtok):
-            return tok
+        tok = self.p.toks[self.p.idx]
+        if isinstance(tok, badtok): return tok
     def getendtok(self):
-        if isinstance(tok := self.gettok(), endtok):
-            return tok
+        tok = self.p.toks[self.p.idx]
+        if isinstance(tok, endtok): return tok
 
     def optional(self, arg:'statebox') -> 'parsernode|None':
         idx = self.p.idx
