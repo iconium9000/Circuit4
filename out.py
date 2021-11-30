@@ -1156,20 +1156,20 @@ def shift_expr():
     with lst():
       idf(shift_expr)
       op('<<')
-      idf(sum)
+      idf(sum_expr)
     with lst():
       idf(shift_expr)
       op('>>')
-      idf(sum)
-    idf(sum)
-def sum():
+      idf(sum_expr)
+    idf(sum_expr)
+def sum_expr():
   with tryor():
     with lst():
-      idf(sum)
+      idf(sum_expr)
       op('+')
       idf(term)
     with lst():
-      idf(sum)
+      idf(sum_expr)
       op('-')
       idf(term)
     idf(term)

@@ -1,142 +1,106 @@
 # cythonparser.py
 
-from typing import Callable
-from cythonlexer import lexer, lextok, optok, idftok, tabtok, numtok, strtok, badtok
+from dataclasses import dataclass
+from typing import Generator
+from cythonlexer import *
 
-class tabs:
-    def __init__(self, p:'parser', *args):
-        self.p = p
-        self.args = args
-    def __enter__(self):
-        self.p.tabs(*self.args)
-        self.tabnum = self.p.tabnum
-        self.p.tabnum += 1
-    def __exit__(self, *args): self.p.tabnum = self.tabnum
-
-def withtabs(f:'Callable[[parser],parsenode]'):
-    def _withtabs(p:'parser'):
-        with tabs(p, f.__name__): return f(p)
-    _withtabs.__name__ = f.__name__
-    return _withtabs
-
-class parsenode:
-    def __init__(self, p:'parser'):
-        raise parsererror(self.__class__.__name__, NotImplemented)
-
-class parsererror(Exception): pass
-
-class ignoreindent:
-    def __init__(self, p:'parser'):
-        self.p = p
-    def __enter__(self):
-        self.tracking = self.p.tracking_indent
-        self.p.tracking_indent = False
-    def __exit__(self, *args):
-        self.p.tracking_indent = self.tracking
-
-class trackindent:
-    def __init__(self, p:'parser'):
-        self.p = p
-    def __enter__(self):
-        self.tracking = self.p.tracking_indent
-        self.p.tracking_indent = True
-    def __exit__(self, *args):
-        self.p.tracking_indent = self.tracking
+class parserfail(Exception): pass
+class parsernode: pass
 
 class parser:
-    def __init__(self, filepath:str):
-        self.lexlist = list(lexer(filepath))
-        self.tabnum = 0
-        self.lexlist_len =  len(self.lexlist)
-        self.lexidx = 0
-        self.tracking_indent = False
-        self.indent_level = 0
+    def __init__(self, filename:str):
+        self.toks = list(lexer(filename))
+        self.ntoks = len(self.toks)
+        self.ntabs = 0
+        self.idx = 0
 
-        with open('lexer.log', 'w') as f:
-            print(*self.lexlist, file=f, sep='\n')
+class statebox:
+
+    def __init__(self, p:parser): self.p = p
+    def __new__(cls, p:parser, err:'type[Exception]|None'=None):
+        cls.__init__(self := super().__new__(cls), p)
+        idx = self.p.idx
+        ntabs = self.p.ntabs
+        self.p.ntabs += 1
+        try: r = self.lextok()
+        finally: self.p.ntabs = ntabs
+        if r: return r
+        elif err: raise err
+        self.p.idx = idx
+
+    def gettok(self): return self.p.toks[self.p.idx]
     
-    def tabs(self, *args):
-        print('  ' * self.tabnum + ' ', *args, self.lexidx, self.lexlist[self.lexidx])
+    def next(self): self.p.idx += 1
 
-    def getnext(self, t:'type[lextok]', match:bool=True):
-        if self.lexidx >= self.lexlist_len:
-            raise parsererror('getnext', 'hit-endmarker')
-        
-        tok = self.lexlist[self.lexidx]
-        if match == isinstance(tok, t):
-            self.tabs('getnext')
-            self.lexidx += 1
+    def lextok(self) -> 'parsernode|None':
+        tok = self.gettok()
+        if isinstance(tok, optok): return self.optok(tok)
+        elif isinstance(tok, idftok): return self.idftok(tok)
+        elif isinstance(tok, tabtok): return self.tabtok(tok)
+        elif isinstance(tok, numtok): return self.numtok(tok)
+        elif isinstance(tok, strtok): return self.strtok(tok)
+        elif isinstance(tok, endtok): return self.endtok(tok)
+        else: return self.badtok(tok)
+
+    def optok(self, t:optok) -> 'parsernode|None': raise parserfail('optok')
+    def idftok(self, t:idftok) -> 'parsernode|None': raise parserfail('idftok')
+    def tabtok(self, t:tabtok) -> 'parsernode|None': raise parserfail('tabtok')
+    def numtok(self, t:numtok) -> 'parsernode|None': raise parserfail('numtok')
+    def strtok(self, t:strtok) -> 'parsernode|None': raise parserfail('strtok')
+    def badtok(self, t:badtok) -> 'parsernode|None': raise parserfail('badtok')
+    def endtok(self, t:endtok) -> 'parsernode|None': raise parserfail('endtok')
+
+    def getoptok(self, *ops:str):
+        if isinstance(tok := self.gettok(), optok):
+            if not ops or tok.op in ops: return tok
+    def getidftok(self):
+        if isinstance(tok := self.gettok(), idftok):
             return tok
-        raise parsererror('getnext', 'no-match', t.__name__, type(tok).__name__)
+    def gettabtok(self):
+        if isinstance(tok := self.gettok(), tabtok):
+            return tok
+    def getnumtok(self):
+        if isinstance(tok := self.gettok(), numtok):
+            return tok
+    def getstrtok(self):
+        if isinstance(tok := self.gettok(), strtok):
+            return tok
+    def getbadtok(self):
+        if isinstance(tok := self.gettok(), badtok):
+            return tok
+    def getendtok(self):
+        if isinstance(tok := self.gettok(), endtok):
+            return tok
 
-    def trynewline(self):
-        tok:tabtok = self.getnext(tabtok)
-        if tok.tabs == self.indent_level: return
-        raise NotImplementedError('trynewline', 'indent/dendent', tok)
+    def optional(self, arg:'statebox') -> 'parsernode|None':
+        idx = self.p.idx
+        if r := arg(self.p): return r
+        self.p.idx = idx
+        return None
 
-    def tryendmarker(self):
-        if self.lexidx < self.lexlist_len:
-            raise parsererror('tryendmarker', 'not-found')
+    def options(self, *args:'statebox') -> 'parsernode|None':
+        idx = self.p.idx
+        for arg in args:
+            if r := arg(self.p): return r
+            self.p.idx = idx
 
-    def tryidentifier(self):
-        tok:idftok = self.getnext(idftok)
-        return tok
-
-    def tryinteger(self):
-        tok:numtok = self.getnext(numtok)
-        return tok
-
-    def trystrings(self):
+    def rep0(self, arg:'statebox') -> Generator[parsernode,None,None]:
         idx = -1
-        ret:'list[strtok]' = []
-        try:
-            while idx < (idx := self.lexidx):
-                tok = self.getnext(strtok)
-                ret.append(tok)
-        except parsererror:
-            self.lexidx = idx
-            if ret: return ret
-        raise parsererror('trystrings', 'none-found')
+        while True:
+            assert idx < self.p.idx
+            idx = self.p.idx
+            if r := arg(self.p): yield r
+            else:
+                self.p.idx = idx
+                return
 
-    def tryops(self, *ops:str, optional:bool=False):
-        idx = self.lexidx
-        tok:optok = self.getnext(optok)
-        if tok.op in ops: return tok
-        self.lexidx = idx
-        if optional: return None
-        raise parsererror('tryops', 'not-found', *ops)
-
-    def trywhile(self, arg:Callable[['parser'],parsenode], min=0):
-        ret:'list[parsenode]' = []
-        with tabs(self, 'trywhile', arg.__name__):
-            try:
-                idx = -1
-                while idx < (idx := self.lexidx):
-                    tok = arg(self)
-                    ret.append(tok)
-            except parsererror as e:
-                self.lexidx = idx
-                self.tabs('caught', e)
-                if len(ret) >= min: return ret
-                raise parsererror('trywhile', 'too-few', len(ret))
-            raise parsererror('trywhile', 'no-move')
-
-    def tryor(self, *args:Callable[['parser'],parsenode], optional:bool=False):
-        idx = self.lexidx
-        with tabs(self, 'tryor', [arg.__name__ for arg in args]):
-            for arg in args:
-                try: return arg(self)
-                except parsererror as e:
-                    self.lexidx = idx
-                    self.tabs('caught', e)
-            if optional: return None
-            raise parsererror('tryor', 'not-found')
-
-    def tryoptional(self, arg:Callable[['parser'],parsenode]):
-        idx = self.lexidx
-        with tabs(self, 'tryor', arg.__name__):
-            try: return arg(self)
-            except parsererror as e:
-                self.lexidx = idx
-                self.tabs('caught', e)
-            return None
+    def rep1(self, arg:'statebox') -> Generator[parsernode,None,None]:
+        idx = self.p.idx
+        assert (r := arg(self.p)); yield r
+        while True:
+            assert idx < self.p.idx
+            idx = self.p.idx
+            if r := arg(self.p): yield r
+            else:
+                self.p.idx = idx
+                return
