@@ -33,22 +33,7 @@ class statebox:
     def next(self): self.p.idx += 1
 
     def lextok(self) -> 'parsernode|None':
-        tok = self.gettok()
-        if isinstance(tok, optok): return self.optok(tok)
-        elif isinstance(tok, idftok): return self.idftok(tok)
-        elif isinstance(tok, tabtok): return self.tabtok(tok)
-        elif isinstance(tok, numtok): return self.numtok(tok)
-        elif isinstance(tok, strtok): return self.strtok(tok)
-        elif isinstance(tok, endtok): return self.endtok(tok)
-        else: return self.badtok(tok)
-
-    def optok(self, t:optok) -> 'parsernode|None': raise parserfail('optok')
-    def idftok(self, t:idftok) -> 'parsernode|None': raise parserfail('idftok')
-    def tabtok(self, t:tabtok) -> 'parsernode|None': raise parserfail('tabtok')
-    def numtok(self, t:numtok) -> 'parsernode|None': raise parserfail('numtok')
-    def strtok(self, t:strtok) -> 'parsernode|None': raise parserfail('strtok')
-    def badtok(self, t:badtok) -> 'parsernode|None': raise parserfail('badtok')
-    def endtok(self, t:endtok) -> 'parsernode|None': raise parserfail('endtok')
+        raise NotImplementedError
 
     def getoptok(self, *ops:str):
         if isinstance(tok := self.gettok(), optok):
