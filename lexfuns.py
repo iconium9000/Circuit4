@@ -61,7 +61,7 @@ class single_subscript_attribute_target(statebox):
     def lextok(self) -> 'lextok|None':
         if prim := t_primary(self.p):
             tok:optok = self.optok('.','[','(')
-            if tok.op == '(': self.p.syntax_error()
+            if tok.op == '(': return
             elif tok.op == '.':
                 self.next()
                 name = self.idftok_next(syntax=True)
@@ -69,12 +69,13 @@ class single_subscript_attribute_target(statebox):
             return self.node(prim, slices(self.p, syntax=True))
 
 class v_single_target(statebox):
-    tracking = False
     def lextok(self) -> 'lextok|None':
-        if self.optok_next('('):
-            t = single_target(self.p, syntax=True)
-            self.optok_next(')', syntax=True)
-            return t
+        with stoptracking(self.p):
+            if self.optok_next('('):
+                t = single_target(self.p, syntax=True)
+            else: return
+        self.optok_next(')', syntax=True)
+        return t
 
 class single_target(statebox):
     def lextok(self) -> 'lextok|None':
@@ -168,7 +169,6 @@ class star_targets_tuple_seq(statebox):
             return self.node([t, *star_target_comma.args(self.p)])
 
 class star_atom(statebox):
-    tracking = False
 
     @dataclass
     class empty_tuple(lextok):
@@ -179,14 +179,20 @@ class star_atom(statebox):
         op:optok
 
     def lextok(self) -> 'lextok|None':
-        if tok := self.optok_next('(','['):
-            if tok.op == '(':
-                a = target_with_star_atom(self.p) or star_targets_tuple_seq(self.p)
-                self.optok_next(')', syntax=True)
-                return a or self.empty_tuple(tok)
-            a = star_targets_list_seq(self.p)
-            self.optok_next(']', syntax=True)
-            return a or self.empty_list(tok)
+        with stoptracking(self.p):
+            if tok := self.optok_next('(','['):
+                if tok.op == '(':
+                    nxt = ')'
+                    a = target_with_star_atom(self.p) or \
+                        star_targets_tuple_seq(self.p) or \
+                        self.empty_tuple(tok)
+                else:
+                    nxt = ']'
+                    a = star_targets_list_seq(self.p) or \
+                        self.empty_list(tok)
+            else: return
+        self.optok_next(nxt, syntax=True)
+        return a
 
 class target_with_star_atom(statebox):
     def lextok(self) -> 'lextok|None':
@@ -314,7 +320,6 @@ class simple_stmts(statebox):
             yield r
         if r: yield r
         tok = self.tabtok(syntax=True)
-        tok = self.tabtok(syntax=True)
         if tok.tabs > self.p.indent: self.p.syntax_error()
         elif tok.tabs == self.p.indent: self.next()
 
@@ -323,13 +328,10 @@ class simple_stmts(statebox):
             return self.node(args)
 
 class list_listcomp(statebox):
-    tracking = False
     pass # TODO
 class tuple_group_genexp(statebox):
-    tracking = False
     pass # TODO
 class dict_set_dictcomp_setcomp(statebox):
-    tracking = False
     pass # TODO
 
 class strings(statebox):
@@ -377,9 +379,75 @@ class t_primary(statebox):
                 if b: a = self.node(a, b)
                 else: return a
 
+class if_disjunctions(statebox):
+    @dataclass
+    class node(lextok):
+        op:optok
+        disj:lextok
+
+    @dataclass
+    class nodes(lextok):
+        nodes:list[lextok]
+
+    def getnodes(self):
+        if if_tok := self.optok_next('if'):
+            while (r := disjunction(self.p)) and (op := self.optok_next('if')):
+                yield self.node(if_tok, r); if_tok = op
+            if r: yield self.node(if_tok, r)
+
+    def lextok(self) -> 'lextok|None':
+        return self.nodes(list(self.getnodes()))
+
+class for_if_clause(statebox):
+    @dataclass
+    class node(lextok):
+        async_tok:'optok|None'
+        for_tok:optok
+        tar:lextok
+        disj:lextok
+        ifdisjs:lextok
+
+    def lextok(self) -> 'lextok|None':
+        async_tok = self.optok_next('async')
+        if for_tok := self.optok_next('for'):
+            tar = star_targets(self.p, syntax=True)
+            self.optok_next('in', syntax=True)
+            disj = disjunction(self.p, syntax=True)
+            ifdisjs = if_disjunctions(self.p)
+            return self.node(async_tok, for_tok, tar, disj, ifdisjs)
+
+class for_if_clauses(statebox):
+    @dataclass
+    class node(lextok):
+        args:list[lextok]
+
+    def getargs(self):
+        while r := for_if_clause(self.p):
+            yield r
+    def lextok(self) -> 'lextok|None':
+        if args := list(self.getargs()):
+            return self.node(args)
+
 class genexp(statebox):
-    tracking = False
-    pass # TODO
+
+    @dataclass
+    class node(lextok):
+        op:optok
+        expr:lextok
+        clauses:lextok
+
+    def lextok(self) -> 'lextok|None':
+        with stoptracking(self.p):
+            if op := self.optok_next('('):
+                if expr := assignment_expression(self.p): pass
+                elif expr := expression(self.p):
+                    if self.optok(':='): return
+                if clauses := for_if_clauses(self.p):
+                    r = self.node(op, expr, clauses)
+                else: return
+            else: return
+        self.optok_next(')',syntax=True)
+        return r
 
 class starred_expression(statebox):
     @dataclass
@@ -431,7 +499,6 @@ class kwarg_or_double_starred(statebox):
             return self.node(op, r)
 
 class arguments(statebox):
-    tracking = False
 
     @dataclass
     class node(lextok):
@@ -444,11 +511,14 @@ class arguments(statebox):
             while (arg := f(self.p)) and self.optok_next(','):
                 yield arg
             if arg: yield arg; break
-        self.optok_next(')',syntax=True)
 
     def lextok(self) -> 'lextok|None':
-        if op := self.optok_next('('):
-            return self.node(op, list(self.getargs()))
+        with stoptracking(self.p):
+            if op := self.optok_next('('):
+                r = self.node(op, list(self.getargs()))
+            else: return
+        self.optok_next(')',syntax=True)
+        return r
 
 class slice(statebox):
 
@@ -470,7 +540,6 @@ class slice(statebox):
             return self.node(opA, opB, a, b, c)
 
 class slices(statebox):
-    tracking = False
 
     @dataclass
     class node(lextok):
@@ -481,14 +550,17 @@ class slices(statebox):
         return slice(self.p) or named_expression(self.p)
 
     def getslices(self):
-        while (r := self.slice()) or self.optok_next(','):
+        while (r := self.slice()) and self.optok_next(','):
             yield r
         if r: yield r
-        self.optok_next(']',syntax=True)
 
     def lextok(self) -> 'lextok|None':
-        if op := self.optok_next('['):
-            return self.node(op, list(self.getslices()))
+        with stoptracking(self.p):
+            if op := self.optok_next('['):
+                r = self.node(op, list(self.getslices()))
+            else: return
+        self.optok_next(']',syntax=True)
+        return r
 
 class primary(statebox):
 
@@ -636,7 +708,8 @@ class comparison(statebox):
         a:lextok
         b:lextok
 
-    ops = {'==', '!=', '<=', '<', '>=', '>', 'in'}
+    single_ops = {'==', '!=', '<=', '<', '>=', '>', 'in'}
+    all_ops = {*single_ops, 'is', 'not'}
 
     def lextok(self):
         if a := bitwise_or(self.p):
@@ -646,15 +719,15 @@ class comparison(statebox):
             return a
 
     def bitop_next(self):
-        if not (tok := self.optok_next()): return
-        if tok.op in self.ops: return tok
-        elif tok.op == 'is':
-            if self.optok_next('not'):
-                return optok(tok.info, 'is not')
-            return tok
-        elif tok.op == 'not':
-            self.optok_next('in',syntax=True)
-            return optok(tok.info, 'not in')
+        if tok := self.optok_next(*self.single_ops, 'is', 'not'):
+            if tok.op == 'is':
+                if self.optok_next('not'):
+                    return optok(tok.info, 'is not')
+                return tok
+            elif tok.op == 'not':
+                self.optok_next('in',syntax=True)
+                return optok(tok.info, 'not in')
+            else: return tok
 
 class inversion(statebox):
     @dataclass

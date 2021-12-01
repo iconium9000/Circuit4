@@ -19,9 +19,16 @@ class parser:
         print('invalid syntax')
         exit(-1)
 
-class statebox:
-    tracking = True
+class stoptracking:
+    def __init__(self, p:parser):
+        self.p = p
+    def __enter__(self):
+        self.tracking = self.p.tracking
+        self.p.tracking = False
+    def __exit__(self, *args):
+        self.p.tracking = self.tracking
 
+class statebox:
     def __init__(self, p:parser, syntax=False): self.p = p
     def __new__(cls, p:parser, syntax=False):
         if (tup := (idx := p.idx, id(cls))) in p.rmap:
@@ -32,13 +39,8 @@ class statebox:
             else: return
         else: tok = p.tok
         cls.__init__(self := super().__new__(cls), p)
-        if cls.tracking: r = self.lextok()
-        else:
-            tracking = p.tracking
-            p.tracking = False
-            r = self.lextok()
-            p.tracking = tracking
-        if r: p.rmap[tup] = r,self.p.idx,self.p.tok; return r
+        if r := self.lextok():
+            p.rmap[tup] = r,self.p.idx,self.p.tok; return r
         p.rmap[tup],p.idx,self.p.tok = None,idx,tok
         if syntax: self.p.syntax_error()
 
@@ -49,6 +51,7 @@ class statebox:
         self.tabtok_next()
 
     def lextok(self) -> 'lextok|None':
+        print(self.__class__.__name__)
         self.p.syntax_error()
 
     def optok(self, *ops:str, syntax=False):

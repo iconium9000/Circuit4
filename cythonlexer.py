@@ -23,7 +23,7 @@ opspat = re.compile('|'.join(opslist))
 
 keywords = set(
     'def del pass break continue return raise from import '
-    'as global nonlocal assert if while lambda class '
+    'as global nonlocal assert if while lambda class await async '
     'for in else elif finally with or and not None True False'.split())
 
 @dataclass

@@ -119,12 +119,12 @@ while_stmt:
 
 for_stmt:
     | 'for' star_targets 'in' ~ star_expressions ':' [TYPE_COMMENT] block [else_block] 
-    | ASYNC 'for' star_targets 'in' ~ star_expressions ':' [TYPE_COMMENT] block [else_block] 
+    | 'async' 'for' star_targets 'in' ~ star_expressions ':' [TYPE_COMMENT] block [else_block] 
 with_stmt:
     | 'with' '(' ','.with_item+ ','? ')' ':' block 
     | 'with' ','.with_item+ ':' [TYPE_COMMENT] block 
-    | ASYNC 'with' '(' ','.with_item+ ','? ')' ':' block 
-    | ASYNC 'with' ','.with_item+ ':' [TYPE_COMMENT] block 
+    | 'async' 'with' '(' ','.with_item+ ','? ')' ':' block 
+    | 'async' 'with' ','.with_item+ ':' [TYPE_COMMENT] block 
 with_item:
     | expression 'as' star_target &(',' | ')' | ':') 
     | expression 
@@ -274,7 +274,7 @@ function_def:
 
 function_def_raw:
     | 'def' NAME '(' [params] ')' ['->' expression ] ':' [func_type_comment] block 
-    | ASYNC 'def' NAME '(' [params] ')' ['->' expression ] ':' [func_type_comment] block 
+    | 'async' 'def' NAME '(' [params] ')' ['->' expression ] ':' [func_type_comment] block 
 func_type_comment:
     | NEWLINE TYPE_COMMENT &(NEWLINE INDENT)   # Must be followed by indented block
     | TYPE_COMMENT
@@ -539,7 +539,7 @@ kvpair: expression ':' expression
 for_if_clauses:
     | for_if_clause+ 
 for_if_clause:
-    | ASYNC 'for' star_targets 'in' ~ disjunction ('if' disjunction )* 
+    | 'async' 'for' star_targets 'in' ~ disjunction ('if' disjunction )* 
     | 'for' star_targets 'in' ~ disjunction ('if' disjunction )* 
 yield_expr:
     | 'yield' 'from' expression 
