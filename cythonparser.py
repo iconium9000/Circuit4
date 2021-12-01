@@ -1,6 +1,13 @@
 # cythonparser.py
 from cythonlexer import *
 
+def syntax_error(info:matchinfo, caller:str):
+    print(f'File "{info.filename}", line {info.lidx}')
+    print(info.line)
+    print(' ' * info.start + '^')
+    print(f'invalid syntax "{caller}"')
+    exit(-1)
+
 class parser:
     def __init__(self, filename:str):
         self.toks = list(lexer(filename))
@@ -10,14 +17,6 @@ class parser:
         self.rmap:'dict[tuple[int,int],lextok]' = {}
         self.indent = 0
         self.tracking = True
-
-    def syntax_error(self):
-        info = self.tok.info
-        print(f'File "{info.filename}", line {info.lidx}')
-        print(info.line)
-        print(' ' * info.start + '^')
-        print('invalid syntax')
-        exit(-1)
 
 class stoptracking:
     def __init__(self, p:parser):
@@ -35,14 +34,17 @@ class statebox:
             if r_idx_tok := p.rmap[tup]:
                 r,p.idx,p.tok = r_idx_tok
                 return r
-            elif syntax: p.syntax_error()
+            elif syntax: syntax_error(p.tok.info, cls.__name__)
             else: return
         else: tok = p.tok
         cls.__init__(self := super().__new__(cls), p)
         if r := self.lextok():
             p.rmap[tup] = r,self.p.idx,self.p.tok; return r
         p.rmap[tup],p.idx,self.p.tok = None,idx,tok
-        if syntax: self.p.syntax_error()
+        if syntax: syntax_error(p.tok.info, cls.__name__)
+
+    def syntax_error(self):
+        syntax_error(self.p.tok.info, self.__class__.__name__)
 
     def next(self):
         self.p.idx += 1
@@ -51,8 +53,7 @@ class statebox:
         self.tabtok_next()
 
     def lextok(self) -> 'lextok|None':
-        print(self.__class__.__name__)
-        self.p.syntax_error()
+        syntax_error(self.p.tok.info, self.__class__.__name__)
 
     def optok(self, *ops:str, syntax=False):
         if isinstance(self.p.tok, optok):

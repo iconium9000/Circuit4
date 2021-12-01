@@ -106,7 +106,7 @@ class vardef(statebox):
             target = self.name(tok)
         elif target := v_single_target(self.p): pass
         elif (prim := t_primary(self.p)) and (tok := self.optok('.','[','(')):
-            if tok.op == '(': self.p.syntax_error()
+            if tok.op == '(': self.syntax_error()
             elif tok.op == '.':
                 self.next()
                 name = self.idftok_next(syntax=True)
@@ -208,7 +208,7 @@ class star_target(statebox):
 
     def lextok(self) -> 'lextok|None':
         if op := self.optok_next('*'):
-            if self.optok('*'): self.p.syntax_error()
+            if self.optok('*'): self.syntax_error()
             t  = target_with_star_atom(self.p, syntax=True)
             return self.node(op, t)
         return target_with_star_atom(self.p)
@@ -232,7 +232,7 @@ class assign_target(statebox):
     def lextok(self) -> 'lextok|None':
         if args := list(self.gettargets()):
             expr = yield_expr(self.p) or star_expressions(self.p, syntax=True)
-            if self.optok('='): self.p.syntax_error()
+            if self.optok('='): self.syntax_error()
             return self.node(args,expr)
 
 class augassign_target(statebox):
@@ -320,7 +320,7 @@ class simple_stmts(statebox):
             yield r
         if r: yield r
         tok = self.tabtok(syntax=True)
-        if tok.tabs > self.p.indent: self.p.syntax_error()
+        if tok.tabs > self.p.indent: self.syntax_error()
         elif tok.tabs == self.p.indent: self.next()
 
     def lextok(self):
@@ -818,18 +818,18 @@ class named_expression(statebox):
         if r := assignment_expression(self.p):
             return r
         elif r := expression(self.p):
-            if self.optok(':='): self.p.syntax_error()
+            if self.optok(':='): self.syntax_error()
             return r
 
 class block(statebox):
     def lextok(self) -> 'lextok|None':
         if tok := self.tabtok_next():
-            if tok.tabs <= self.p.indent: self.p.syntax_error()
+            if tok.tabs <= self.p.indent: self.syntax_error()
             indent = self.p.indent
             self.p.indent = tok.tabs
             r = statements(self.p, syntax=True)
             tok = self.tabtok(syntax=True)
-            if indent < tok.tabs: self.p.syntax_error()
+            if indent < tok.tabs: self.syntax_error()
             self.p.indent = indent
             if indent == tok.tabs: self.next()
             return r
