@@ -1,10 +1,12 @@
 if 10 == 10:
-    asdf = 1 # this
+    asdf:int = 1 # this
             # 456
     asdf += 1
 else:
-    asdf = -1
-
+    asdf = -1, 10, 
+    help
+    if self.testing():
+        i:list[int] = [1,2,3,4,5]
 
 print(asdf)
 newvar:tuple[
