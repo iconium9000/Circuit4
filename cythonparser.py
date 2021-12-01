@@ -7,28 +7,40 @@ class parser:
         self.ntoks = len(self.toks)
         self.idx = 0
         self.tok = self.toks[self.idx]
+        self.rmap:'dict[tuple[int,int],lextok]' = {}
         self.indent = 0
         self.tracking = True
+
+    def syntax_error(self):
+        info = self.tok.info
+        print(f'File "{info.filename}", line {info.lidx}')
+        print(info.line)
+        print(' ' * info.start + '^')
+        print('invalid syntax')
+        exit(-1)
 
 class statebox:
     tracking = True
 
     def __init__(self, p:parser, syntax=False): self.p = p
     def __new__(cls, p:parser, syntax=False):
+        if (tup := (idx := p.idx, id(cls))) in p.rmap:
+            if r_idx_tok := p.rmap[tup]:
+                r,p.idx,p.tok = r_idx_tok
+                return r
+            elif syntax: p.syntax_error()
+            else: return
+        else: tok = p.tok
         cls.__init__(self := super().__new__(cls), p)
-        idx = p.idx
-        tok = self.p.tok = p.toks[idx]
-        if cls.tracking:
-            r = self.lextok()
+        if cls.tracking: r = self.lextok()
         else:
             tracking = p.tracking
             p.tracking = False
             r = self.lextok()
             p.tracking = tracking
-        if r: return r
-        p.idx = idx
-        self.p.tok = tok
-        self.assert_syntax(not syntax)
+        if r: p.rmap[tup] = r,self.p.idx,self.p.tok; return r
+        p.rmap[tup],p.idx,self.p.tok = None,idx,tok
+        if syntax: self.p.syntax_error()
 
     def next(self):
         self.p.idx += 1
@@ -36,73 +48,79 @@ class statebox:
         if self.p.tracking: return
         self.tabtok_next()
 
-    def assert_syntax(self, arg:bool):
-        if arg: return
-        info = self.p.tok.info
-        print(f'File "{info.filename}", line {info.lidx}')
-        print(info.line)
-        print(' ' * info.start + '^')
-        print('invalid syntax')
-        exit(-1)
-
     def lextok(self) -> 'lextok|None':
-        self.assert_syntax(False)
+        self.p.syntax_error()
 
-    def optok(self,*ops:str):
+    def optok(self, *ops:str, syntax=False):
         if isinstance(self.p.tok, optok):
             if not ops or self.p.tok.op in ops:
                 return self.p.tok
-    def optok_next(self,*ops:str):
+        if syntax: self.p.syntax_error()
+
+    def optok_next(self, *ops:str, syntax=False):
         if isinstance(tok := self.p.tok, optok):
             if not ops or tok.op in ops:
                 self.next()
                 return tok
+        if syntax: self.p.syntax_error()
 
-    def idftok(self):
+    def idftok(self, syntax=False):
         if isinstance(self.p.tok, idftok):
             return self.p.tok
-    def idftok_next(self):
+        elif syntax: self.p.syntax_error()
+
+    def idftok_next(self, syntax=False):
         if isinstance(tok := self.p.tok, idftok):
             self.next()
             return tok
+        elif syntax: self.p.syntax_error()
 
-    def tabtok(self):
+    def tabtok(self, syntax=False):
         if isinstance(self.p.tok, tabtok):
             return self.p.tok
-    def tabtok_next(self):
+        elif syntax: self.p.syntax_error()
+
+    def tabtok_next(self, syntax=False):
         if isinstance(tok := self.p.tok, tabtok):
             self.next()
             return tok
+        elif syntax: self.p.syntax_error()
             
-    def numtok(self):
+    def numtok(self, syntax=False):
         if isinstance(self.p.tok, numtok):
             return self.p.tok
-    def numtok_next(self):
+        elif syntax: self.p.syntax_error()
+    def numtok_next(self, syntax=False):
         if isinstance(tok := self.p.tok, numtok):
             self.next()
             return tok
+        elif syntax: self.p.syntax_error()
 
-    def strtok(self):
+    def strtok(self, syntax=False):
         if isinstance(self.p.tok, strtok):
             return self.p.tok
-    def strtok_next(self):
+        elif syntax: self.p.syntax_error()
+    def strtok_next(self, syntax=False):
         if isinstance(tok := self.p.tok, strtok):
             self.next()
             return tok
-            
-    def badtok(self):
+        elif syntax: self.p.syntax_error()
+    def badtok(self, syntax=False):
         if isinstance(self.p.tok, badtok):
             return self.p.tok
-    def badtok_next(self):
+        elif syntax: self.p.syntax_error()
+    def badtok_next(self, syntax=False):
         if isinstance(tok := self.p.tok, badtok):
             self.next()
             return tok
+        elif syntax: self.p.syntax_error()
             
-    def endtok(self):
+    def endtok(self, syntax=False):
         if isinstance(self.p.tok, endtok):
             return self.p.tok
-    def endtok_next(self):
+        elif syntax: self.p.syntax_error()
+    def endtok_next(self, syntax=False):
         if isinstance(tok := self.p.tok, endtok):
             self.next()
             return tok
-            
+        elif syntax: self.p.syntax_error()
