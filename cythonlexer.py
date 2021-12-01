@@ -38,47 +38,52 @@ class matchinfo:
     def __str__(self):
         return f'{self.lidx}:{self.start}:{self.end}'
 
-@dataclass
-class lextok:
-    info:matchinfo
+class lextok: pass
 
 @dataclass
 class optok(lextok):
+    info:matchinfo
     op:str
     def __str__(self):
         return str(('op', self.op, str(self.info)))
 
 @dataclass
 class idftok(lextok):
+    info:matchinfo
     name:str
     def __str__(self):
         return str(('name', self.name, str(self.info)))
 
 @dataclass
 class tabtok(lextok):
+    info:matchinfo
     tabs:int
     def __str__(self):
         return str(('tabs', self.tabs, str(self.info)))
 
 @dataclass
 class numtok(lextok):
+    info:matchinfo
     num:str
     def __str__(self):
         return str(('num', self.num, str(self.info)))
 
 @dataclass
 class strtok(lextok):
+    info:matchinfo
     string:str
     def __str__(self):
         return str(('str', self.string, str(self.info)))
 
 @dataclass
 class endtok(lextok):
+    info:matchinfo
     def __str__(self):
         return str(('end', str(self.info)))
 
 @dataclass
 class badtok(lextok):
+    info:matchinfo
     def __str__(self):
         return str(('bad', str(self.info)))
 
