@@ -576,27 +576,25 @@ star_target:
     | '*' (!'*' star_target) 
     | target_with_star_atom
 target_with_star_atom:
-    | t_primary '.' NAME !t_lookahead 
-    | t_primary '[' slices ']' !t_lookahead 
-    | star_atom
+    | single_subscript_attribute_target
+    | NAME | star_atom
 star_atom:
-    | NAME 
     | '(' target_with_star_atom ')' 
     | '(' [star_targets_tuple_seq] ')' 
     | '[' [star_targets_list_seq] ']' 
 
+v_single_target: '(' single_target ')' 
 single_target:
     | single_subscript_attribute_target
     | NAME 
-    | '(' single_target ')' 
+    | v_single_target
 single_subscript_attribute_target:
     | t_primary '.' NAME !t_lookahead 
     | t_primary '[' slices ']' !t_lookahead 
 
 del_targets: ','.del_target+ [','] 
 del_target:
-    | t_primary '.' NAME !t_lookahead 
-    | t_primary '[' slices ']' !t_lookahead 
+    | single_subscript_attribute_target
     | del_t_atom
 del_t_atom:
     | NAME 

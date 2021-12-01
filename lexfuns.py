@@ -6,7 +6,7 @@ class file(statebox):
         if tok := self.tabtok_next():
             self.p.indent = tok.tabs
             r = statements(self.p)
-            self.assert_syntax(self.endtok())
+            self.endtok(syntax=True)
             return r
 
 class statements(statebox):
@@ -19,18 +19,13 @@ class statements(statebox):
         while r := statement(self.p): yield r
 
     def lextok(self):
-        args = list(self.getstmts())
-        if args: return self.node(args)
+        if args := list(self.getstmts()):
+            return self.node(args)
 
 class statement(statebox):
     def lextok(self) -> 'lextok|None':
         if self.tabtok(): return
-        r = compound_stmt(self.p) or simple_stmts(self.p)
-        self.assert_syntax(tok := self.tabtok())
-        self.assert_syntax(tok.tabs <= self.p.indent)
-        if tok.tabs == self.p.indent: self.next()
-        return r
-
+        return compound_stmt(self.p) or simple_stmts(self.p)
 
 @dataclass
 class attributeref(lextok):
@@ -39,17 +34,52 @@ class attributeref(lextok):
     name:idftok
 
 class yield_expr(statebox):
-    pass # TODO
+    @classmethod
+    class node(lextok):
+        yield_op:optok
+        from_op:'optok|None'
+        expr:'lextok|None'
+
+    def lextok(self) -> 'lextok|None':
+        if yield_op := self.optok_next('yield'):
+            if from_op := self.optok_next('from'):
+                expr = expression(self.p, syntax=True)
+                return self.node(yield_op, from_op, expr)
+            expr = star_expressions(self.p)
+            return self.node(yield_op, None, expr)
 
 class annotated_rhs(statebox):
     def lextok(self) -> 'lextok|None':
         return yield_expr(self.p) or star_expressions(self.p)
 
 class single_subscript_attribute_target(statebox):
-    pass # TODO
+    @dataclass
+    class node(lextok):
+        prim:lextok
+        slices:lextok
+
+    def lextok(self) -> 'lextok|None':
+        if prim := t_primary(self.p):
+            tok:optok = self.optok('.','[','(')
+            if tok.op == '(': self.p.syntax_error()
+            elif tok.op == '.':
+                self.next()
+                name = self.idftok_next(syntax=True)
+                return attributeref(prim, tok, name)
+            return self.node(prim, slices(self.p, syntax=True))
+
+class v_single_target(statebox):
+    tracking = False
+    def lextok(self) -> 'lextok|None':
+        if self.optok_next('('):
+            t = single_target(self.p, syntax=True)
+            self.optok_next(')', syntax=True)
+            return t
 
 class single_target(statebox):
-    pass # TODO
+    def lextok(self) -> 'lextok|None':
+        return single_subscript_attribute_target(self.p) or \
+            self.idftok_next() or v_single_target(self.p)
 
 class vardef(statebox):
 
@@ -69,17 +99,16 @@ class vardef(statebox):
         hint:lextok
         assign:'lextok|None'
 
+
     def lextok(self) -> 'lextok|None':
         if tok := self.idftok_next():
             target = self.name(tok)
-        elif op := self.optok_next('('):
-            target = single_target(self.p, syntax=True)
-            self.assert_syntax(self.optok_next(')'))
+        elif target := v_single_target(self.p): pass
         elif (prim := t_primary(self.p)) and (tok := self.optok('.','[','(')):
-            self.assert_syntax(tok.op != '(')
-            if tok.op == '.':
+            if tok.op == '(': self.p.syntax_error()
+            elif tok.op == '.':
                 self.next()
-                self.assert_syntax(name := self.idftok_next())
+                name = self.idftok_next(syntax=True)
                 target = attributeref(prim, tok, name)
             elif tok.op == '[':
                 r = slices(self.p, syntax=True)
@@ -93,47 +122,76 @@ class vardef(statebox):
             return self.node(target, op, hint, a)
         return self.node(target, op, hint, None)
 
-class star_targets_tuple_seq(statebox):
-    pass # TODO
+class star_target_comma(statebox):
+
+    @staticmethod
+    def args(p:parser):
+        while t := star_target_comma(p):
+            yield t
+        if t := star_target(p):
+            yield t
+
+    def lextok(self) -> 'lextok|None':
+        if (t := star_target(self.p)) and self.optok_next(','):
+            return t
+
+class star_targets(statebox):
+
+    @dataclass
+    class node(lextok):
+        args:'list[lextok]'
+
+    def lextok(self) -> 'lextok|None':
+        if t := star_target(self.p):
+            if self.optok_next(','):
+                return self.node([t, *star_target_comma.args(self.p)])
+            return t
 
 class star_targets_list_seq(statebox):
-    pass # TODO
+
+    @dataclass
+    class node(lextok):
+        args:'list[lextok]'
+
+    def lextok(self) -> 'lextok|None':
+        if args := list(star_target_comma.args(self.p)):
+            return self.node(args)
+
+class star_targets_tuple_seq(statebox):
+    
+    @dataclass
+    class node(lextok):
+        args:'list[lextok]'
+
+    def lextok(self) -> 'lextok|None':
+        if (t := star_target(self.p)) and self.optok_next(','):
+            return self.node([t, *star_target_comma.args(self.p)])
 
 class star_atom(statebox):
     tracking = False
 
     @dataclass
-    class node(lextok):
+    class empty_tuple(lextok):
+        op:optok
+
+    @dataclass
+    class empty_list(lextok):
         op:optok
 
     def lextok(self) -> 'lextok|None':
         if tok := self.optok_next('(','['):
             if tok.op == '(':
                 a = target_with_star_atom(self.p) or star_targets_tuple_seq(self.p)
-                self.assert_syntax(self.optok_next(')'))
-                return a or self.node(tok)
+                self.optok_next(')', syntax=True)
+                return a or self.empty_tuple(tok)
             a = star_targets_list_seq(self.p)
-            self.assert_syntax(self.optok_next(']'))
-            return a or self.node(tok)
+            self.optok_next(']', syntax=True)
+            return a or self.empty_list(tok)
 
 class target_with_star_atom(statebox):
-    tracking = False
-
-    @dataclass
-    class node(lextok):
-        prim:lextok
-        slices:lextok
-
     def lextok(self) -> 'lextok|None':
-        if prim := t_primary(self.p):
-            tok:optok = self.optok('.','[','(')
-            self.assert_syntax(tok.op != '(')
-            if tok.op == '.':
-                self.next()
-                self.assert_syntax(name := self.idftok_next())
-                return attributeref(prim, tok, name)
-            return self.node(prim, slices(self.p, syntax=True))
-        return self.idftok_next() or star_atom(self.p)
+        return single_subscript_attribute_target(self.p) or \
+            self.idftok_next() or star_atom(self.p)
 
 class star_target(statebox):
 
@@ -144,26 +202,10 @@ class star_target(statebox):
 
     def lextok(self) -> 'lextok|None':
         if op := self.optok_next('*'):
-            self.assert_syntax(not self.optok('*'))
+            if self.optok('*'): self.p.syntax_error()
             t  = target_with_star_atom(self.p, syntax=True)
             return self.node(op, t)
         return target_with_star_atom(self.p)
-
-class star_target_comma(statebox):
-    def lextok(self) -> 'lextok|None':
-        if (t := star_target(self.p)) and self.optok_next(','):
-            return t
-
-class star_targets(statebox):
-    @dataclass
-    class node(lextok):
-        args:'list[lextok]'
-    def gettargets(self):
-        while t := star_target_comma(self.p): yield t
-        if t := star_target(self.p): yield t
-    def lextok(self) -> 'lextok|None':
-        if args := list(self.gettargets()):
-            return self.node(args)
 
 class star_targets_assign(statebox):
     def lextok(self) -> 'lextok|None':
@@ -184,7 +226,7 @@ class assign_target(statebox):
     def lextok(self) -> 'lextok|None':
         if args := list(self.gettargets()):
             expr = yield_expr(self.p) or star_expressions(self.p, syntax=True)
-            self.assert_syntax(not self.optok('='))
+            if self.optok('='): self.p.syntax_error()
             return self.node(args,expr)
 
 class augassign_target(statebox):
@@ -197,7 +239,7 @@ class augassign_target(statebox):
         expr:lextok
 
     def lextok(self) -> 'lextok|None':
-        if (t := single_target(self.p)) or (op := self.optok_next(*self.ops)):
+        if (t := single_target(self.p)) and (op := self.optok_next(*self.ops)):
             r = yield_expr(self.p) or star_expressions(self.p, syntax=True)
             return self.node(t,op,r)
 
@@ -205,18 +247,41 @@ class assignment(statebox):
     def lextok(self) -> 'lextok|None':
         return vardef(self.p) or assign_target(self.p) or augassign_target(self.p)
 
-class star_expressions(statebox): pass
-class return_stmt(statebox): pass
-class import_stmt(statebox): pass
-class raise_stmt(statebox): pass
-class del_stmt(statebox): pass
-class yield_stmt(statebox): pass
-class assert_stmt(statebox): pass
-class global_stmt(statebox): pass
-class nonlocal_stmt(statebox): pass
-class pass_stmt(statebox): pass
-class break_stmt(statebox): pass
-class continue_stmt(statebox): pass
+class star_expression(statebox):
+    @dataclass
+    class node(lextok):
+        op:optok
+        expr:lextok
+    def lextok(self) -> 'lextok|None':
+        if (op := self.optok_next('*')) and (expr := bitwise_or(self.p)):
+            return self.node(op, expr)
+        return expression(self.p)
+
+class star_expressions(statebox):
+
+    @dataclass
+    class node(lextok):
+        args:'list[lextok]'
+
+    def getexprs(self):
+        while (r := star_expression(self.p)) and self.optok_next(','):
+            yield r
+        if r: yield r
+    def lextok(self) -> 'lextok|None':
+        if args := list(self.getexprs()):
+            return self.node(args)
+
+class return_stmt(statebox): pass # TODO
+class import_stmt(statebox): pass # TODO
+class raise_stmt(statebox): pass # TODO
+class del_stmt(statebox): pass # TODO
+class yield_stmt(statebox): pass # TODO
+class assert_stmt(statebox): pass # TODO
+class global_stmt(statebox): pass # TODO
+class nonlocal_stmt(statebox): pass # TODO
+class pass_stmt(statebox): pass # TODO
+class break_stmt(statebox): pass # TODO
+class continue_stmt(statebox): pass # TODO
 
 class simple_stmt(statebox):
     ops = {
@@ -245,13 +310,16 @@ class simple_stmts(statebox):
         args:'list[lextok]'
 
     def getstmts(self):
-        while r := simple_stmt(self.p):
+        while (r := simple_stmt(self.p)) and self.optok_next(';'):
             yield r
-            if not self.optok_next(';'): break
-        self.assert_syntax(self.tabtok())
+        if r: yield r
+        tok = self.tabtok(syntax=True)
+        tok = self.tabtok(syntax=True)
+        if tok.tabs > self.p.indent: self.p.syntax_error()
+        elif tok.tabs == self.p.indent: self.next()
 
     def lextok(self):
-        if args := list(*self.getstmts()):
+        if args := list(self.getstmts()):
             return self.node(args)
 
 class list_listcomp(statebox):
@@ -333,7 +401,7 @@ class kwarg(statebox):
 
     def lextok(self) -> 'lextok|None':
         if name := self.idftok_next():
-            self.assert_syntax(tok := self.optok_next('='))
+            tok = self.optok_next('=',syntax=True)
             r = expression(self.p, syntax=True)
             return self.node(tok, name, r)
 
@@ -373,11 +441,10 @@ class arguments(statebox):
     def getargs(self):
         if self.optok_next(')'): return
         for f in (argument, kwarg_or_starred, kwarg_or_double_starred):
-            while arg := f(self.p):
+            while (arg := f(self.p)) and self.optok_next(','):
                 yield arg
-                self.assert_syntax(tok := self.optok_next(',',')'))
-                if tok.op == ')': return
-        self.assert_syntax(self.optok_next(')'))
+            if arg: yield arg; break
+        self.optok_next(')',syntax=True)
 
     def lextok(self) -> 'lextok|None':
         if op := self.optok_next('('):
@@ -410,12 +477,14 @@ class slices(statebox):
         op:optok
         args:'list[lextok]'
 
+    def slice(self):
+        return slice(self.p) or named_expression(self.p)
+
     def getslices(self):
-        while r := slice(self.p) or named_expression(self.p):
+        while (r := self.slice()) or self.optok_next(','):
             yield r
-            self.assert_syntax(tok := self.optok_next(',',']'))
-            if tok.op == ']': return
-        self.assert_syntax(tok := self.optok_next(']'))
+        if r: yield r
+        self.optok_next(']',syntax=True)
 
     def lextok(self) -> 'lextok|None':
         if op := self.optok_next('['):
@@ -434,7 +503,7 @@ class primary(statebox):
             while tok := self.optok('.', '(', '['):
                 if tok.op == '.':
                     self.next()
-                    self.assert_syntax(name := self.idftok_next())
+                    name = self.idftok_next(syntax=True)
                     a = attributeref(a, tok, name)
                 elif tok.op == '(':
                     b = genexp(self.p) or arguments(self.p, syntax=True)
@@ -584,7 +653,7 @@ class comparison(statebox):
                 return optok(tok.info, 'is not')
             return tok
         elif tok.op == 'not':
-            self.assert_syntax(self.optok_next('in'))
+            self.optok_next('in',syntax=True)
             return optok(tok.info, 'not in')
 
 class inversion(statebox):
@@ -648,7 +717,7 @@ class expression(statebox):
         elif a := disjunction(self.p):
             if ifop := self.optok_next('if'):
                 b = disjunction(self.p, syntax=True)
-                self.assert_syntax(elseop := self.optok_next('else'))
+                elseop = self.optok_next('else',syntax=True)
                 c = expression(self.p, syntax=True)
                 return self.node(ifop, elseop, a, b, c)
             return a
@@ -676,24 +745,25 @@ class named_expression(statebox):
         if r := assignment_expression(self.p):
             return r
         elif r := expression(self.p):
-            self.assert_syntax(self.optok(':=') is None)
+            if self.optok(':='): self.p.syntax_error()
             return r
 
 class block(statebox):
     def lextok(self) -> 'lextok|None':
         if tok := self.tabtok_next():
-            self.assert_syntax(tok.tabs > self.p.indent)
+            if tok.tabs <= self.p.indent: self.p.syntax_error()
             indent = self.p.indent
             self.p.indent = tok.tabs
             r = statements(self.p, syntax=True)
-            self.assert_syntax(tok := self.tabtok())
-            self.assert_syntax(self.p.indent > tok.tabs)
-            self.assert_syntax(indent >= tok.tabs)
+            tok = self.tabtok(syntax=True)
+            if indent < tok.tabs: self.p.syntax_error()
+            self.p.indent = indent
             if indent == tok.tabs: self.next()
             return r
-        raise NotImplementedError
+        return simple_stmts(self.p)
 
-class function_def(statebox): pass
+class function_def(statebox):
+    pass # TODO
 
 class if_stmt(statebox):
 
@@ -708,33 +778,34 @@ class if_stmt(statebox):
         op:optok
         r:lextok
 
+    @dataclass
     class ifnode(lextok):
-        def __init__(self, op:optok, if_test:lextok, *nodes:lextok):
-            self.op = op
-            self.if_test = if_test
-            self.nodes = nodes
+        op:optok
+        if_test:lextok
+        block:lextok
+        nodes:list[lextok]
 
     def getelifs_else(self):
         while op := self.optok_next('elif'):
             a = named_expression(self.p, syntax=True)
-            self.assert_syntax(self.optok_next(':'))
+            self.optok_next(':', syntax=True)
             yield self.elifnode(op, a, block(self.p, syntax=True))
         if op := self.optok_next('else'):
-            self.assert_syntax(self.optok_next(':'))
+            self.optok_next(':', syntax=True)
             yield self.elsenode(op, block(self.p, syntax=True))
 
     def lextok(self):
         if tok := self.optok_next('if'):
             a = named_expression(self.p, syntax=True)
-            self.assert_syntax(self.optok_next(':'))
+            self.optok_next(':',syntax=True)
             b = block(self.p, syntax=True)
-            return self.ifnode(tok, a, b, *self.getelifs_else())
+            return self.ifnode(tok, a, b, list(self.getelifs_else()))
 
-class class_stmt(statebox): pass
-class with_stmt(statebox): pass
-class for_stmt(statebox): pass
-class while_stmt(statebox): pass
-class match_stmt(statebox): pass
+class class_stmt(statebox): pass # TODO
+class with_stmt(statebox): pass # TODO
+class for_stmt(statebox): pass # TODO
+class while_stmt(statebox): pass # TODO
+class match_stmt(statebox): pass # TODO
 
 class compound_stmt(statebox):
     ops:'dict[str,statebox]' = {
@@ -749,4 +820,3 @@ class compound_stmt(statebox):
     def lextok(self) -> 'lextok|None':
         if t := self.optok(*self.ops):
             return self.ops[t.op](self.p)
-
