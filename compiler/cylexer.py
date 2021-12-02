@@ -32,10 +32,12 @@ keywords = {'raise', 'continue', 'as', 'in', 'else',
     'async', 'global', 'elif', 'break', 'await', 'not',
     'import', 'await', 'not', 'import', 'assert', 'if', 'from'}
 
+class tree_node: pass
+
 @dataclass
-class lextok:
-    string:str
-    slen:str
+class lextok(tree_node):
+    str:str
+    slen:int
     tidx:int
     lnum:int
     lidx:int
