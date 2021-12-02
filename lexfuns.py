@@ -360,12 +360,24 @@ class atom(statebox):
         elif tok := self.numtok_next(): return tok
         else: return strings(self.p)
 
+
 class t_primary(statebox):
 
     class name(statebox):
         def lextok(self) -> 'lextok|None':
             if self.optok_next() and (name := self.idftok_next()):
                 return name
+    
+    class lookahead(statebox):
+        def lextok(self) -> 'lextok|None':
+            if tok := self.optok('(','[','.'):
+                if tok.op == '[': b = slices(self.p)
+                elif tok.op == '(':
+                    b = genexp(self.p) or arguments(self.p)
+                elif name := self.name(self.p):
+                    b = attributeref(a, tok, name)
+                if b: a = self.node(a, b)
+                else: return a
 
     @dataclass
     class node(lextok):

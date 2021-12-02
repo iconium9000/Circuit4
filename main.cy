@@ -2,6 +2,7 @@ if 10 == 10:
     asdf:int = 1 # this
             # 456
     asdf += 1
+elif hax := 10: help[10,10] = 3 % 1
 else:
     asdf = -1, 10, 
     help
