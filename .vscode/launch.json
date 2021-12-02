@@ -5,6 +5,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "cython-compiler",
+            "type": "python",
+            "request": "launch",
+            "program": "compiler/main.py",
+            "console": "integratedTerminal",
+            "args": ["main.cy"],
+        },
+        {
             "name": "parsepnf.py",
             "type": "python",
             "request": "launch",
