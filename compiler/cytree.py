@@ -9,11 +9,20 @@ class tree_range(tree_node):
 
 @dataclass
 class statements_n(tree_node):
-    args:list[tree_node]
+    args:tuple[tree_node]
 
 @dataclass
 class if_block_n(tree_node):
-    blocks:'tuple[tuple[tree_node,tree_node]|tree_node]'
+    test:tree_node
+    blocks:tree_node
+
+@dataclass
+class or_block_n(tree_node):
+    blocks:'tuple[tree_node]'
+
+@dataclass
+class and_block_n(tree_node):
+    blocks:'tuple[tree_node]'
 
 @dataclass
 class assignment_n(tree_node):
@@ -21,9 +30,13 @@ class assignment_n(tree_node):
     expr:tree_node
 
 @dataclass
-class dual_op(tree_node):
-    a:opstok
-    b:opstok
+class not_op_n(tree_node):
+    expr:tree_node
+
+@dataclass
+class compare_n(tree_node):
+    expr:tree_node
+    compares:tuple[tuple[str,tree_node], ...]
 
 @dataclass
 class binary_op_n(tree_node):
@@ -34,4 +47,4 @@ class binary_op_n(tree_node):
 @dataclass
 class unary_op_n(tree_node):
     op:str
-    n:tree_node
+    a:tree_node

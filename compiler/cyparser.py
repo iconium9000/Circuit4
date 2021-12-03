@@ -54,30 +54,35 @@ class parser:
                 return self.tok
         if err: self.syntax_error(err)
 
-    def nexttok(self, *lexs:type[lextok], err:'str|None'=None):
-        for lex in lexs:
-            if isinstance(self.tok, lex):
-                return self.next()
+    def nexttok(self, lex:type[lextok], err:'str|None'=None):
+        if isinstance(self.tok, lex):
+            return self.next()
         if err: self.syntax_error(err)
 
-    def nextop(self, *ops:str, err:'str|None'=None):
-        if isinstance(tok := self.tok, opstok):
-            if tok.str in ops:
-                return self.next().str
+    def nextop(self, ops:set[str], err:'str|None'=None):
+        if isinstance(tok := self.tok, opstok) and tok.str in ops:
+            self.next()
+            return tok
         if err: self.syntax_error(err)
-    
+
     def next2ops(self, ops:'set[str|tuple[str,str]|tuple[str]]'):
         if isinstance(a := self.tok, opstok):
             b = self.toks[self.tok.tidx+1]
             if not isinstance(b, opstok): b = None
             for op in ops:
                 if isinstance(op, str):
-                    if op == a.str: return a.str
+                    if op == a.str: return a
                 elif len(op) == 1 or not b:
-                    if (op := op[0]) == a.str: return a.str
+                    if (op := op[0]) == a.str: return a
                 elif op[0] == a.str and op[1] == b.str:
                     abstr = a.str + ' ' + b.str
-                    return opstok(abstr, len(abstr), )
+                    return opstok(abstr, len(abstr), a.tidx, a.lnum, a.lidx)
+
+def todo(r:'Callable[[parser],tree_node|None]'):
+    def _r(p:parser) -> 'tree_node|None':
+        p.syntax_error(f'"{r.__name__}" is Not Implemented')
+    _r.__name__ = r.__name__
+    return _r
 
 class indent_tracking:
     def __init__(self, p:parser, indented_state:bool):
