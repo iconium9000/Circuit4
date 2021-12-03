@@ -1,21 +1,19 @@
 # cyparsefuns.py
 from cyparser import *
-from lexfuns import bitwise_or
-from out import factor
 
 def file_r(p:parser):
     with indent_tracking(p, True):
         if tok := p.nexttok(tabtok):
             p.indent = tok.slen
-            r = p.rule(statements_r)
+            r = p.saferule(statements_r)
             p.nexttok(endtok, "failed to reach end of file")
             return r
 
 def statements_r(p:parser):
     def getstmts():
-        while r := p.rule(statement_r):
+        while r := p.saferule(statement_r):
             if isinstance(r, statements_n):
-                yield from r.args
+                yield from r.exprs
             else: yield r
     if args := tuple(getstmts()):
         if len(args) == 1: return args[0]
@@ -23,7 +21,7 @@ def statements_r(p:parser):
 
 def statement_r(p:parser):
     if p.gettok(tabtok): return
-    return p.rule(compound_stmt_r) or p.rule(simple_stmts_r)
+    return p.saferule(compound_stmt_r) or p.saferule(simple_stmts_r)
 
 def compound_stmt_r(p:parser):
     if op := p.nextop(compound_stmt_map.keys()):
@@ -41,13 +39,13 @@ def if_stmt_r(p:parser):
         if_test = p.rule(named_expression_r, "missing 'if case'")
         p.nextop({':'}, "missing ':'")
         if_block = p.rule(block_r, "missing if block")
-        yield if_block_n(if_test, if_block)
+        yield if_expr_n(if_test, if_block)
 
         while p.nextop({'elif'}):
             elif_test = p.rule(named_expression_r, "missing 'elif case'")
             p.nextop({':'}, "missing ':")
             elif_block = p.rule(block_r, "missing elif block")
-            yield if_block_n(elif_test, elif_block)
+            yield if_expr_n(elif_test, elif_block)
 
         if p.nextop('else'):
             p.nextop({':'}, "missing ':")
@@ -93,7 +91,7 @@ def assignment_expression(p:parser):
         return assignment_n(name_tok, expr)
 
 def named_expression_r(p:parser):
-    return p.rule(assignment_expression) or p.rule(expression_r)
+    return p.saferule(assignment_expression) or p.saferule(expression_r)
 
 @todo
 def block_r(p:parser): pass
@@ -101,12 +99,12 @@ def block_r(p:parser): pass
 def expression_r(p:parser):
     if p.nextop({'lambda'}):
         return p.rule(lambdadef_r, "missing lambda body")
-    elif if_body := p.rule(disjunction_r):
+    elif if_body := p.saferule(disjunction_r):
         if p.nextop({'if'}):
             if_test = p.rule(disjunction_r, "missing if body")
             p.nextop({'else'}, sys="missing 'else' token")
             else_body = p.rule(expression_r, "missing else body")
-            return or_block_n(if_block_n(if_test, if_body), else_body)
+            return or_block_n(if_expr_n(if_test, if_body), else_body)
         return if_body
 
 @todo
@@ -114,7 +112,7 @@ def lambdadef_r(p:parser): pass
 
 def disjunction_r(p:parser):
     def getconjs():
-        if a := p.rule(conjunction_r):
+        if a := p.saferule(conjunction_r):
             yield a
             while p.nextop({'or'}):
                 yield p.rule(conjunction_r, "no conjunction after 'or' operator")
@@ -125,7 +123,7 @@ def disjunction_r(p:parser):
 
 def conjunction_r(p:parser):
     def getconjs():
-        if a := p.rule(inversion_r):
+        if a := p.saferule(inversion_r):
             yield a
             while p.nextop({'and'}):
                 yield p.rule(inversion_r, "no conjunction after 'and' operator")
@@ -136,17 +134,17 @@ def conjunction_r(p:parser):
 
 def inversion_r(p:parser):
     if p.nextop({'not'}):
-        return not_op_n(p.rule(inversion_r, "no inversion after 'not' operator"))
-    return p.rule(comparison_r)
+        return unary_op_n('not', p.rule(inversion_r, "no inversion after 'not' operator"))
+    return p.saferule(comparison_r)
 
 def comparison_r(p:parser):
     def getcomps():
         while op := p.next2ops({
             ('is',), ('is','not'), 'in', ('not','in'),
             '>', '>=', '<', '<=', '!=', '=='}):
-            yield op.str, p.rule(bitwise_or, f"no bitwise_or after {op.str} operator")
+            yield op.str, p.rule(bitwise_or_r, f"no bitwise_or after {op.str} operator")
 
-    if expr := p.rule(bitwise_or_r):
+    if expr := p.saferule(bitwise_or_r):
         if comps := tuple(getcomps()):
             return compare_n(expr, comps)
         return expr
@@ -158,32 +156,36 @@ bitwise_op_priority = {
 
 @dataclass
 class fact_bit_n:
-    def __init__(self, prev:'None|op_bit_n', f:tree_node):
-        self.prev = prev
-        self.fact = f
-        self.next:'None|op_bit_n' = None
+    fact:tree_node
+    prev:'op_bit_n|None' = None
+    next:'op_bit_n|None' = None
 
-@dataclass
 class op_bit_n:
-    def __init__(self, prev:fact_bit_n, op:str, f:tree_node):
-        self.prev = prev
+    def __init__(self, op:str, prev:fact_bit_n, f:tree_node):
         self.op = op
-        self.next = fact_bit_n(self, f)
+        self.prev = prev
+        prev.next = self
+        self.next = fact_bit_n(f, self)
+
     def join(self):
+        # a    +    b    -          ...
+        # prev self next next.next
+
         self.prev.fact = binary_op_n(self.op, self.prev.fact, self.next.fact)
         self.prev.next = self.next.next
-        self.next.prev = self.prev
+        if self.next.next:
+            self.next.next.prev = self.prev
 
 def bitwise_or_r(p:parser):
-    if f := p.rule(factor_r):
-        fnode = root = fact_bit_n(f)
-
+    if f := p.saferule(factor_r):
+        f_node = root = fact_bit_n(f, 0)
         idx = 0
         opmap:dict[tuple[int,int],op_bit_n] = {}
         while op := p.nextop(bitwise_op_priority.keys()):
             f = p.rule(factor_r, f"no factor after '{op.str}' operator")
-            fnode = (onode := op_bit_n(fnode, op.str, f)).next
-            opmap[bitwise_op_priority[op.str], idx] = onode
+            op_node = op_bit_n(op.str, f_node, f)
+            f_node = op_node.next
+            opmap[bitwise_op_priority[op.str], idx] = op_node
             idx += 1
 
         keys = list(opmap.keys()); keys.sort()
@@ -192,17 +194,24 @@ def bitwise_or_r(p:parser):
 
 def factor_r(p:parser):
     if op := p.nextop({'+','-','~'}):
-        return unary_op_n(op.str, p.rule(factor_r, f"no factor after {op.str} operator"))
-    return p.rule(factor_r)
+        return unary_op_n(op.str, p.rule(factor_r, f"no factor after '{op.str}' operator"))
+    return p.saferule(power_r)
 
-@todo
-def power_r(p:parser): pass
-@todo
-def await_primary_r(p:parser): pass
+def power_r(p:parser):
+    if a := p.saferule(await_primary_r):
+        if p.nextop({'**'}):
+            b = p.rule(factor_r, "no factor after '**' operator")
+            return binary_op_n('**', a, b)
+        return a
+
+def await_primary_r(p:parser):
+    if p.nextop({'await'}):
+        return await_n(p.rule(primary_r), f"no primary after 'await' operator")
+    return p.saferule(primary_r)
 
 def primary_r(p:parser):
     # TODO
-    return atom
+    return p.saferule(atom)
 
 def atom(p:parser): return (
     p.nexttok(idftok)
@@ -211,20 +220,20 @@ def atom(p:parser): return (
     or
     p.nextop({'True','False','None','...'})
     or
-    p.rule(strings_r)
+    p.saferule(strings_r)
     or
-    p.rule(tuple_group_genexp_r)
+    p.saferule(tuple_group_genexp_r)
     or
-    p.rule(list_listcomp_r)
+    p.saferule(list_listcomp_r)
     or
-    p.rule(dict_set_dictcomp_setcomp_r))
+    p.saferule(dict_set_dictcomp_setcomp_r))
 
 def test():
     p = parser('test.py', 
         "a - b / c ** d // h is not g"
         "% i != j == k and l or m or n")
     p.nexttok(tabtok)
-    r = p.rule(disjunction_r)
+    r = p.saferule(disjunction_r)
     print(r)
 
 @todo

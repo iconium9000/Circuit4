@@ -14,20 +14,18 @@ class parser:
         self.indent_tracking = True
         self.tok = self.toks[0]
 
-    def syntax_error(self, msg:'str|None'):
-        if not msg: return
+    def syntax_error(self, msg:str):
         print(f'File "{self.filename}", line {self.tok.lnum}')
         print(self.lexer.lines[self.tok.lnum])
         print(' ' * self.tok.lidx + '^')
         print(msg)
         exit(-1)
 
-    def rule(self, rule:'Callable[[parser],tree_node|None]', err:'str|None'):
+    def saferule(self, rule:'Callable[[parser],tree_node|None]'):
         tup = self.tok.tidx, id(rule)
         if ret := self.tmap.get(tup):
-            if ret is True:
-                return self.syntax_error(err)
-            self.tok = ret.end
+            if ret is True: return
+            self.tok = ret.next_tok
             return ret
         self.tmap[tup] = True
         tok = self.tok
@@ -36,7 +34,9 @@ class parser:
             self.tmap[tup] = ret = tree_range(ret, tok, self.tok)
             return ret
         self.tok = tok
-        return self.syntax_error(err)
+
+    def rule(self, rule:'Callable[[parser],tree_node|None]', err:str):
+        return self.saferule(rule) or self.syntax_error(err)
 
     def next(self):
         tok = self.tok
@@ -68,11 +68,12 @@ class parser:
             if not isinstance(b, opstok): b = None
             for op in ops:
                 if isinstance(op, str):
-                    if op == a.str: return a
+                    if op == a.str: self.next(); return a
                 elif len(op) == 1 or not b:
-                    if (op := op[0]) == a.str: return a
+                    if (op := op[0]) == a.str: self.next(); return a
                 elif op[0] == a.str and op[1] == b.str:
                     abstr = a.str + ' ' + b.str
+                    self.next(); self.next()
                     return opstok(abstr, len(abstr), a.tidx, a.lnum, a.lidx)
 
 def todo(r:'Callable[[parser],tree_node|None]'):

@@ -13,17 +13,18 @@ numpat = re.compile(r'0(x|X)[0-9a-fA-F]+|0(b|B)[01]+|0[0-7]*|[0-9]+')
 badpat = re.compile(r'.')
 strpat = re.compile(r"\"|\'|\'\'\'")
 
-opsset = {
+opsset = [
     '!', '?', '|', '&', '/', '{', '=', '<<=',
     '<', '-', '@=', '^', '}', ':=', '&=', '%',
     '[', '**', '>>', '>>=', '|=', ':', '==',
     '@', '*=', '<>', '->', '%=', '**=', '~',
     '//=', '!=', '.', '>', '-=', ';', ',',
     '//', ']', '*', '/=', '...', ')', '(',
-    '^=', '<<', '<=', '>=', '+=', '+'}
+    '^=', '<<', '<=', '>=', '+=', '+']
+opsset.sort(key=lambda s : len(s)); opsset.reverse()
 opspat = re.compile('|'.join('\\' + '\\'.join(op) for op in opsset))
 
-keywords = {'raise', 'continue', 'as', 'in', 'else',
+keywords = {'raise', 'continue', 'as', 'in', 'is', 'else',
     'or', 'def', 'finally', 'del', 'None', 'for',
     'class', 'False', 'while', 'lambda', 'pass',
     'True', 'None', 'for', 'class', 'return', 'and',
