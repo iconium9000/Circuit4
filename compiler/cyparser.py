@@ -42,23 +42,42 @@ class parser:
         if err: self.syntax_error(err)
 
     def next(self):
+        tok = self.tok
         self.tok = self.toks[self.tok.tidx+1]
-        if self.indent_tracking: return
-        self.nexttok(tabtok)
+        if not self.indent_tracking:
+            self.nexttok(tabtok)
+        return tok
 
-    def gettok(self, *lexs:type[lextok], ops:'set[str]|None'=None, err:'str|None'=None):
-        rlex = None
+    def gettok(self, *lexs:type[lextok], err:'str|None'=None):
         for lex in lexs:
             if isinstance(self.tok, lex):
-                rlex = lex; break
-        if rlex and (not ops or self.tok.str in ops):
-            return self.tok
-        elif err: self.syntax_error(err)
+                return self.tok
+        if err: self.syntax_error(err)
 
-    def nexttok(self, *lexs:type[lextok], ops:'set[str]|None'=None, err:'str|None'=None):
-        if tok := self.gettok(*lexs, ops=ops, err=err):
-            self.next()
-            return tok
+    def nexttok(self, *lexs:type[lextok], err:'str|None'=None):
+        for lex in lexs:
+            if isinstance(self.tok, lex):
+                return self.next()
+        if err: self.syntax_error(err)
+
+    def nextop(self, *ops:str, err:'str|None'=None):
+        if isinstance(tok := self.tok, opstok):
+            if tok.str in ops:
+                return self.next().str
+        if err: self.syntax_error(err)
+    
+    def next2ops(self, ops:'set[str|tuple[str,str]|tuple[str]]'):
+        if isinstance(a := self.tok, opstok):
+            b = self.toks[self.tok.tidx+1]
+            if not isinstance(b, opstok): b = None
+            for op in ops:
+                if isinstance(op, str):
+                    if op == a.str: return a.str
+                elif len(op) == 1 or not b:
+                    if (op := op[0]) == a.str: return a.str
+                elif op[0] == a.str and op[1] == b.str:
+                    abstr = a.str + ' ' + b.str
+                    return opstok(abstr, len(abstr), )
 
 class indent_tracking:
     def __init__(self, p:parser, indented_state:bool):

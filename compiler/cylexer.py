@@ -4,13 +4,14 @@ from dataclasses import dataclass
 import re
 from typing import Iterable
 
+class tree_node: pass
+
 nwlpat = re.compile(r'(\#[^\n]*| |\n)*\n')
 spcpat = re.compile(r' +')
 idfpat = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*')
 numpat = re.compile(r'0(x|X)[0-9a-fA-F]+|0(b|B)[01]+|0[0-7]*|[0-9]+')
 badpat = re.compile(r'.')
 strpat = re.compile(r"\"|\'|\'\'\'")
-
 
 opsset = {
     '!', '?', '|', '&', '/', '{', '=', '<<=',
@@ -31,8 +32,6 @@ keywords = {'raise', 'continue', 'as', 'in', 'else',
     'pass', 'True', 'return', 'and', 'nonlocal', 'with',
     'async', 'global', 'elif', 'break', 'await', 'not',
     'import', 'await', 'not', 'import', 'assert', 'if', 'from'}
-
-class tree_node: pass
 
 @dataclass
 class lextok(tree_node):
