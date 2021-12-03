@@ -21,7 +21,7 @@ class parser:
         print(msg)
         exit(-1)
 
-    def saferule(self, rule:'Callable[[parser],tree_node|None]'):
+    def rule(self, rule:'Callable[[parser],tree_node|None]'):
         tup = self.tok.tidx, id(rule)
         if ret := self.tmap.get(tup):
             if ret is True: return
@@ -35,8 +35,8 @@ class parser:
             return ret
         self.tok = tok
 
-    def rule(self, rule:'Callable[[parser],tree_node|None]', err:str):
-        return self.saferule(rule) or self.syntax_error(err)
+    def rule_err(self, rule:'Callable[[parser],tree_node|None]', err:str):
+        return self.rule(rule) or self.syntax_error(err)
 
     def next(self):
         tok = self.tok
