@@ -88,7 +88,7 @@ compound_stmt_map = {
 def assignment_expression(p:parser):
     if (name_tok := p.nexttok(idftok)) and p.nextop({':='}):
         expr = p.rule_err(expression_r, "no expression after ':=' operator")
-        return assignment_n(name_tok, expr)
+        return assignment_n(expr, (name_tok,))
 
 def named_expression_r(p:parser):
     return p.rule(assignment_expression) or p.rule(expression_r)
@@ -137,12 +137,24 @@ def inversion_r(p:parser):
         return unary_op_n('not', p.rule_err(inversion_r, "no inversion after 'not' operator"))
     return p.rule(comparison_r)
 
+
+def comparison_op_r(p:parser):
+    if op := p.nextop({'is','not','in','>', '>=', '<', '<=', '!=', '=='}):
+        if op.str == 'is':
+            if p.nextop('not'):
+                return opstok('is not', len('is not'), op.tidx, op.lnum, op.lidx)
+            return op
+        elif op.str != 'not':
+            return op
+        elif p.nextop({'in'}):
+            return opstok('not in', len('not in'), op.tidx, op.lnum, op.lidx)
+
 def comparison_r(p:parser):
+
     def getcomps():
-        while op := p.next2ops({
-            ('is',), ('is','not'), 'in', ('not','in'),
-            '>', '>=', '<', '<=', '!=', '=='}):
-            yield op.str, p.rule_err(bitwise_or_r, f"no bitwise_or after {op.str} operator")
+        while r := p.rule(comparison_op_r):
+            op:opstok = r.node
+            yield op.str, p.rule_err(bitwise_or_r, f"no bitwise_or after operator")
 
     if expr := p.rule(bitwise_or_r):
         if comps := tuple(getcomps()):
@@ -231,11 +243,12 @@ def atom(p:parser): return (
 
 def test():
     p = parser('test.py', 
-        "a - b / c ** d // h is not g"
-        "% i != j == k and l or m or n")
+        "a - b / c ** d // h is not -g"
+        "% i != j == k > 17 > 3 and l or m or not not n")
     p.nexttok(tabtok)
     r = p.rule(disjunction_r)
     print(r)
+    r.print_insts()
 
 @todo
 def strings_r(p:parser): pass

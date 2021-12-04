@@ -7,4 +7,4 @@ if __name__ == "__main__":
     with open(filename, 'r') as f:
         file = f.read()
     p = cyparsefuns.parser(filename, file)
-    r = cyparsefuns.file_r(p)
+    # r = cyparsefuns.file_r(p)

@@ -2,9 +2,88 @@
 
 from dataclasses import dataclass
 import re
-from typing import Iterable
+from typing import Generator, Iterable
 
-class tree_node: pass
+@dataclass
+class trace:
+    opname:str
+    args:'tuple[trace, ...]|None'=None
+
+    def __str__(self):
+        s = self.opname
+        if self.args:
+            s += '(' + ','.join(str(arg) for arg in self.args) + ')'
+        return s
+
+@dataclass
+class inst:
+    idx:int
+    op:str
+    args:'tuple[str|int, ...]'
+
+    def __str__(self):
+        return str(self.idx).rjust(3) + \
+            self.op.rjust(8) + ' ' + \
+            ' '.join(str(arg).rjust(4) for arg in self.args)
+
+class insts:
+    def __init__(self):
+        self._reg:int=1
+
+        self.instmap:dict[int,inst] = {}
+        self._inst:int=1
+
+        self._num:int=1
+        self.num_map:dict[str,int] = {}
+
+        self._str:int=1
+        self.str_map:dict[str,int] = {}
+
+        self._idf:int=1
+        self.idf_map:dict[str,int] = {}
+
+    def newinst(self, idx:int, op:str, *args:'str|int'):
+        i = inst(idx, op, args)
+        self.instmap[idx] = i
+
+    def inst(self):
+        self._inst += 1
+        return self._inst-1
+
+    def reg(self):
+        self._reg += 1
+        return self._reg-1
+
+class tree_node:
+    def trc(self) -> trace:
+        raise NotImplementedError(f'trc not implemented for {self.__class__.__name__}')
+
+    def itc(self, i: insts, reg: int) -> None:
+        raise NotImplementedError(f'itc not implemented for {self.__class__.__name__}')
+
+    def __str__(self):
+        return str(self.trc())
+
+    def print_insts(self):
+        i = insts()
+        self.itc(i, i.reg())
+        i.newinst(i.inst(), 'exit', 0)
+
+        print('numbers')
+        for idx,num in i.num_map.items():
+            print(idx, num)
+
+        print('identifiers')
+        for idx,idf in i.idf_map.items():
+            print(idx, idf)
+
+        print('strings')
+        for idx,string in i.str_map.items():
+            print(idx, string)
+
+        print('instructions')
+        for idx in range(1,i._inst):
+            print(i.instmap[idx])
 
 nwlpat = re.compile(r'(\#[^\n]*| |\n)*\n')
 spcpat = re.compile(r' +')
@@ -42,11 +121,35 @@ class lextok(tree_node):
     lnum:int
     lidx:int
 
-class strtok(lextok): pass
+class numtok(lextok):
+    def trc(self) -> trace:
+        return trace(f'num:"{self.str}"')
+    def itc(self, i: insts, reg: int):
+        if not (numidx := i.num_map.get(self.str)):
+            numidx = i._num; i._num += 1
+            i.num_map[numidx] = self.str
+        i.newinst(i.inst(), 'num', reg, numidx)
+
+class strtok(lextok):
+    def trc(self) -> trace:
+        return trace(f'str:"{self.str}"')
+    def itc(self, i: insts, reg: int):
+        if not (stridx := i.str_map.get(self.str)):
+            stridx = i._str; i._str += 1
+            i.str_map[stridx] = self.str
+        i.newinst(i.inst(), 'str', reg, stridx)
+
+class idftok(lextok):
+    def trc(self) -> trace:
+        return trace(f'idf:"{self.str}"')
+    def itc(self, i: insts, reg: int):
+        if not (idfidx := i.idf_map.get(self.str)):
+            idfidx = i._idf; i._idf += 1
+            i.idf_map[idfidx] = self.str
+        i.newinst(i.inst(), 'idf', reg, idfidx)
+
 class tabtok(lextok): pass
-class idftok(lextok): pass
 class opstok(lextok): pass
-class numtok(lextok): pass
 class badtok(lextok): pass
 class endtok(lextok): pass
 

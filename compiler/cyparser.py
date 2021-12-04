@@ -62,19 +62,6 @@ class parser:
             return tok
         if err: self.syntax_error(err)
 
-    def next2ops(self, ops:'set[str|tuple[str,str]|tuple[str]]'):
-        if isinstance(a := self.tok, opstok):
-            b = self.toks[self.tok.tidx+1]
-            if not isinstance(b, opstok): b = None
-            for op in ops:
-                if isinstance(op, str):
-                    if op == a.str: self.next(); return a
-                elif len(op) == 1 or not b:
-                    if (op := op[0]) == a.str: self.next(); return a
-                elif op[0] == a.str and op[1] == b.str:
-                    abstr = a.str + ' ' + b.str
-                    self.next(); self.next()
-                    return opstok(abstr, len(abstr), a.tidx, a.lnum, a.lidx)
 
 def todo(r:'Callable[[parser],tree_node|None]'):
     def _r(p:parser) -> 'tree_node|None':
