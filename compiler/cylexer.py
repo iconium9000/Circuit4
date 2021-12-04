@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 import re
-from typing import Generator, Iterable
+from typing import Generator, Iterable, TypeVar
 
 @dataclass
 class trace:
@@ -10,80 +10,121 @@ class trace:
     args:'tuple[trace, ...]|None'=None
 
     def __str__(self):
-        s = self.opname
         if self.args:
-            s += '(' + ','.join(str(arg) for arg in self.args) + ')'
-        return s
+            return self.opname + '(' + ','.join(str(arg) for arg in self.args) + ')'
+        return self.opname
+
+T = TypeVar('T')
+def backwards(t:tuple[T, ...]): return (t[i] for i in range(len(t)-1, -1, -1))
+
+class idmap:
+    def __init__(self):
+        self._map:dict[int,str] = {}
+        self._idx = 0
+    
+    def idx(self, i:'instruction|register'):
+        if idx := self._map.get(id(i)):
+            return idx
+        self._idx += 1
+        idx = i.__class__.__name__[0] + str(self._idx)
+        self._map[id(i)] = idx
+        return idx
+
+class register: pass
+@dataclass
+class instruction:
+    next:'instruction'
+
+    def str(self, i:idmap) -> tuple[str, ...]:
+        n = self.__class__.__name__
+        raise NotImplementedError(f"str is not NotImplemented for " + n)
 
 @dataclass
-class inst:
-    idx:int
+class identifier_inst(instruction):
+    reg:register
+    idf:str
+
+    def str(self, i: idmap):
+        return i.idx(self), 'idf', i.idx(self.reg), self.idf
+
+@dataclass
+class number_inst(instruction):
+    reg:register
+    num:str
+
+    def str(self, i: idmap) -> tuple[str, ...]:
+        return i.idx(self), 'num', i.idx(self.reg), self.num
+
+@dataclass
+class string_inst(instruction):
+    reg:register
+    string:str
+
+    def str(self, i: idmap) -> tuple[str, ...]:
+        return i.idx(self), 'str', i.idx(self.reg), self.string
+
+@dataclass
+class todo_inst(instruction):
+    inst:'None|instruction'=None
+
+    def str(self, i: idmap) -> tuple[str, ...]:
+        return self.inst.str(i)
+
+@dataclass
+class binary_op_inst(instruction):
     op:str
-    args:'tuple[str|int, ...]'
+    reg:register
+    arga:register
+    argb:register
 
-    def __str__(self):
-        return str(self.idx).rjust(3) + \
-            self.op.rjust(8) + ' ' + \
-            ' '.join(str(arg).rjust(4) for arg in self.args)
+    def str(self, i: idmap) -> tuple[str, ...]:
+        return i.idx(self), self.op, i.idx(self.reg), i.idx(self.arga), i.idx(self.argb)
 
-class insts:
-    def __init__(self):
-        self._reg:int=1
+@dataclass
+class unary_op_inst(instruction):
+    op:str
+    reg:register
+    arg:register
 
-        self.instmap:dict[int,inst] = {}
-        self._inst:int=1
+    def str(self, i: idmap) -> tuple[str, ...]:
+        return i.idx(self), self.op, i.idx(self.reg), i.idx(self.arg)
 
-        self._num:int=1
-        self.num_map:dict[str,int] = {}
+@dataclass
+class branch_inst(instruction):
+    invert:str
+    reg:register
+    branch:instruction
+    next:instruction
 
-        self._str:int=1
-        self.str_map:dict[str,int] = {}
+    def str(self, i: idmap) -> tuple[str, ...]:
+        op = 'br-if-t' if self.invert else 'br-if-f'
+        return i.idx(self), op, i.idx(self.branch), i.idx(self.reg)
 
-        self._idf:int=1
-        self.idf_map:dict[str,int] = {}
+@dataclass
+class exit_inst(instruction):
+    code:register
+    next:None
 
-    def newinst(self, idx:int, op:str, *args:'str|int'):
-        i = inst(idx, op, args)
-        self.instmap[idx] = i
-
-    def inst(self):
-        self._inst += 1
-        return self._inst-1
-
-    def reg(self):
-        self._reg += 1
-        return self._reg-1
+    def str(self, i: idmap) -> tuple[str, ...]:
+        return i.idx(self), 'exit', i.idx(self.code)
 
 class tree_node:
     def trc(self) -> trace:
         raise NotImplementedError(f'trc not implemented for {self.__class__.__name__}')
 
-    def itc(self, i: insts, reg: int) -> None:
+    def itc(self, next:instruction, reg:register) -> instruction:
         raise NotImplementedError(f'itc not implemented for {self.__class__.__name__}')
 
     def __str__(self):
         return str(self.trc())
 
     def print_insts(self):
-        i = insts()
-        self.itc(i, i.reg())
-        i.newinst(i.inst(), 'exit', 0)
+        i = idmap()
+        inst = self.itc(exit_inst(None, reg := register()), reg)
 
-        print('numbers')
-        for idx,num in i.num_map.items():
-            print(idx, num)
-
-        print('identifiers')
-        for idx,idf in i.idf_map.items():
-            print(idx, idf)
-
-        print('strings')
-        for idx,string in i.str_map.items():
-            print(idx, string)
-
-        print('instructions')
-        for idx in range(1,i._inst):
-            print(i.instmap[idx])
+        while inst.next:
+            print(inst.str(i))
+            inst = inst.next
 
 nwlpat = re.compile(r'(\#[^\n]*| |\n)*\n')
 spcpat = re.compile(r' +')

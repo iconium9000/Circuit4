@@ -10,8 +10,8 @@ class tree_range(tree_node):
     def trc(self) -> trace:
         return self.node.trc()
 
-    def itc(self, i: insts, reg: int):
-        return self.node.itc(i, reg)
+    def itc(self, next:instruction, reg:register) -> instruction:
+        return self.node.itc(next, reg)
 
 @dataclass
 class statements_n(tree_node):
@@ -20,8 +20,10 @@ class statements_n(tree_node):
     def trc(self) -> trace:
         return trace('stats', tuple(n.trc() for n in self.exprs))
 
-    def itc(self, i: insts, reg: int):
-        for expr in self.exprs: expr.itc(i, i._reg)
+    def itc(self, next:instruction, reg:register) -> instruction:
+        for expr in backwards(self.exprs):
+            next = expr.itc(next, reg)
+        return next
 
 @dataclass
 class if_expr_n(tree_node):
@@ -37,7 +39,7 @@ class if_expr_n(tree_node):
     def trc(self) -> trace:
         return trace('if', (self.test.trc(), self.expr.trc()))
 
-    def itc(self, i: insts, reg: int):
+    def itc(self, next:instruction, reg:register) -> instruction:
         self.test.itc(i, reg)
         idx = i.inst()
         self.expr.itc(i, i._reg)
@@ -57,7 +59,7 @@ class or_block_n(tree_node):
     def trc(self) -> trace:
         return trace('or', tuple(n.trc() for n in self.exprs))
 
-    def itc(self, i: insts, reg: int):
+    def itc(self, next:instruction, reg:register) -> instruction:
         if not self.exprs: return 0
 
         branches = tuple(expr.itc(i, reg) or i.inst() for expr in self.exprs)
@@ -78,7 +80,7 @@ class and_block_n(tree_node):
     def trc(self) -> trace:
         return trace('and', tuple(n.trc() for n in self.exprs))
 
-    def itc(self, i: insts, reg: int):
+    def itc(self, next:instruction, reg:register) -> instruction:
         if not self.exprs: return 0
 
         branches = tuple(expr.itc(i, reg) or i.inst() for expr in self.exprs)
@@ -93,7 +95,7 @@ class assignment_n(tree_node):
     def trc(self) -> trace:
         return trace('assign', (self.target.trc(), self.expr.trc()))
     
-    def itc(self, i: insts, reg: int):
+    def itc(self, next:instruction, reg:register) -> instruction:
         self.expr.itc(i, reg)
         for target in self.targets:
             target.itc(i, target_reg := i.reg())
@@ -110,7 +112,7 @@ class compare_n(tree_node):
             (self.expr.trc(),
             *(trace(f'op:"{op}"', (n.trc(),)) for op, n in self.compares)))
 
-    def itc(self, i: insts, reg: int):
+    def itc(self, next:instruction, reg:register) -> instruction:
         if not self.compares: return self.expr.itc(i, reg)
 
         self.expr.itc(i, rega := i.reg())
@@ -137,7 +139,7 @@ class binary_op_n(tree_node):
     def trc(self) -> trace:
         return trace(f'op:"{self.op}"', (self.expr_a.trc(), self.expr_b.trc()))
 
-    def itc(self, i: insts, reg: int):
+    def itc(self, next:instruction, reg:register) -> instruction:
         self.expr_a.itc(i, rega := i.reg())
         self.expr_b.itc(i, regb := i.reg())
         i.newinst(i.inst(), self.op, reg, rega, regb)
@@ -153,7 +155,7 @@ class unary_op_n(tree_node):
     def trc(self) -> trace:
         return trace(f'op:"{self.op}"', (self.expr.trc(),))
 
-    def itc(self, i: insts, reg: int):
+    def itc(self, next:instruction, reg:register) -> instruction:
         self.expr.itc(i, rega := i.reg())
         i.newinst(i.inst(), self.op, reg, rega)
 
@@ -164,6 +166,6 @@ class await_n(tree_node):
     def trc(self) -> trace:
         return trace('await', (self.expr.trc(),))
 
-    def itc(self, i: insts, reg: int):
+    def itc(self, next:instruction, reg:register) -> instruction:
         self.expr.itc(i, reg)
         i.newinst(i.inst(), 'await', reg)
