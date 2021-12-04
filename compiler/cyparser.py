@@ -1,11 +1,12 @@
 # cyparser.py
 from typing import Callable, Literal, NoReturn
-from cytree import *
+import cylexer as lex
+from cytree import tree_node, tree_range
 
 class parser:
 
     def __init__(self, filename:str, file:str):
-        self.lexer = lexer(filename, file)
+        self.lexer = lex.lexer(filename, file)
         self.tmap:'dict[tuple[int,int],tree_range|Literal[True]]' = {}
         self.indent = 0
         self.indent_tracking = True
@@ -35,27 +36,27 @@ class parser:
         tok = self.tok
         self.tok = self.lexer.toks[self.tok.tidx+1]
         if not self.indent_tracking:
-            self.nexttok(tabtok)
+            self.nexttok(lex.tabtok)
         return tok
 
-    def gettok(self, lex:type[lextok], err:'str|None'=None):
+    def gettok(self, lex:type[lex.lextok], err:'str|None'=None):
         if isinstance(self.tok, lex):
             return self.tok
         if err: self.error(err)
 
-    def nexttok(self, lex:type[lextok], err:'str|None'=None):
+    def nexttok(self, lex:type[lex.lextok], err:'str|None'=None):
         if isinstance(self.tok, lex):
             return self.next()
         if err: self.error(err)
 
     def nextop(self, ops:set[str], err:'str|None'=None):
-        if isinstance(tok := self.tok, opstok) and tok.str in ops:
+        if isinstance(tok := self.tok, lex.opstok) and tok.str in ops:
             self.next()
             return tok
         if err: self.error(err)
 
 def todo(r:'Callable[[parser],tree_node|None]'):
-    def _r(p:parser) -> 'tree_node|None':
+    def _r(p:parser):
         p.error(f'"{r.__name__}" is Not Implemented')
     _r.__name__ = r.__name__
     return _r

@@ -1,6 +1,6 @@
 # cylexer.py
 import re
-from cycompiler import *
+from dataclasses import dataclass
 
 nwlpat = re.compile(r'(\#[^\n]*| |\n)*\n')
 spcpat = re.compile(r' +')

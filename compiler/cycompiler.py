@@ -42,18 +42,18 @@ class register: pass
 
 @dataclass
 class instruction:
-    next:'instruction|exit_inst'
+    next:'instruction|exit_i'
 
 @dataclass
-class exit_inst:
+class exit_i:
     code:register
     next:None=None
 
 @dataclass
-class pass_inst(instruction): pass
+class pass_i(instruction): pass
 
 @dataclass
-class branch_inst(instruction):
+class branch_i(instruction):
     '''
     go to next if reg is true;
     go to branch if reg is false
@@ -63,64 +63,64 @@ class branch_inst(instruction):
     test:register
 
 @dataclass
-class except_inst(instruction):
-    raise_to:'instruction|exit_inst'
+class except_i(instruction):
+    raise_to:'instruction|exit_i'
     exc_type:register
     exc_value:register
     exc_traceback:register
 
 @dataclass
-class assign_inst(instruction):
+class assign_i(instruction):
     target:register
     arg:register
 
 @dataclass
-class await_inst(instruction):
+class await_i(instruction):
     target:register
     arg:register
 
 @dataclass
-class binary_op_inst(instruction):
+class binary_op_i(instruction):
     op:str
     target:register
     arga:register
     argb:register
 
-class compare_inst(binary_op_inst): pass
+class compare_i(binary_op_i): pass
 
 @dataclass
-class unary_op_inst(instruction):
+class unary_op_i(instruction):
     op:str
     target:register
     arg:register
 
 @dataclass
-class number_inst(instruction):
+class number_i(instruction):
     target:register
     num:str
 
 @dataclass
-class identifier_inst(instruction):
+class identifier_i(instruction):
     target:register
     idf:str
 
 @dataclass
-class string_inst(instruction):
+class string_i(instruction):
     target:register
     string:str
 
 @dataclass
-class strings_inst(instruction):
+class strings_i(instruction):
     target:register
     strings:tuple[register]
 
 @dataclass
-class bool_inst(instruction):
+class bool_i(instruction):
     target:register
     val:'bool|None'
 
 @dataclass
-class ellipsis_inst(instruction):
+class ellipsis_i(instruction):
     target:register
 
 class compile:
@@ -134,10 +134,10 @@ class compile:
         exc_type = register()
         exc_traceback = register()
 
-        exit_to = exit_inst(exc_value)
-        raise_to = except_inst(exit_to, exit_to, exc_type, exc_value, exc_traceback)
+        exit_to = exit_i(exc_value)
+        raise_to = except_i(exit_to, exit_to, exc_type, exc_value, exc_traceback)
         ctrl = control(raise_to)
-        inst = itc(ctrl, pass_inst(exit_to), exc_value)
+        inst = itc(ctrl, pass_i(exit_to), exc_value)
 
         self.catalog(inst)
 
@@ -149,8 +149,8 @@ class compile:
             self.labels.add(id(inst), inst)
         return False
 
-    def catalog(self, inst:instruction) -> None:
+    def catalog(self, inst:'instruction|exit_i') -> None:
         while inst and self.checkinst(inst):
-            if isinstance(binst := inst, branch_inst):
+            if isinstance(binst := inst, branch_i):
                 return self.catalog(binst.next) or self.catalog(binst.branch)
             inst = inst.next
