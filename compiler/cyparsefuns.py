@@ -241,15 +241,6 @@ def atom(p:parser): return (
     or
     p.rule(dict_set_dictcomp_setcomp_r))
 
-def test():
-    p = parser('test.py', 
-        "a - b / c ** d // h is not -g"
-        "% i != j == k > 17 > 3 and l or m or not not n")
-    p.nexttok(tabtok)
-    r = p.rule(disjunction_r)
-    print(r)
-    r.print_insts()
-
 @todo
 def strings_r(p:parser): pass
 
@@ -262,4 +253,3 @@ def list_listcomp_r(p:parser): pass
 @todo
 def dict_set_dictcomp_setcomp_r(p:parser): pass
 
-test()

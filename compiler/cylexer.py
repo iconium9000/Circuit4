@@ -15,7 +15,7 @@ class trace:
         return self.opname
 
 T = TypeVar('T')
-def backwards(t:tuple[T, ...]): return (t[i] for i in range(len(t)-1, -1, -1))
+def reverse(t:tuple[T, ...]): return (t[i] for i in range(len(t)-1, -1, -1))
 
 class idmap:
     def __init__(self):
@@ -31,100 +31,91 @@ class idmap:
         return idx
 
 class register: pass
+
 @dataclass
 class instruction:
     next:'instruction'
 
-    def str(self, i:idmap) -> tuple[str, ...]:
-        n = self.__class__.__name__
-        raise NotImplementedError(f"str is not NotImplemented for " + n)
-
 @dataclass
 class identifier_inst(instruction):
-    reg:register
+    target:register
     idf:str
-
-    def str(self, i: idmap):
-        return i.idx(self), 'idf', i.idx(self.reg), self.idf
 
 @dataclass
 class number_inst(instruction):
-    reg:register
+    target:register
     num:str
-
-    def str(self, i: idmap) -> tuple[str, ...]:
-        return i.idx(self), 'num', i.idx(self.reg), self.num
 
 @dataclass
 class string_inst(instruction):
-    reg:register
+    target:register
     string:str
 
-    def str(self, i: idmap) -> tuple[str, ...]:
-        return i.idx(self), 'str', i.idx(self.reg), self.string
+@dataclass
+class assign_inst(instruction):
+    target:register
+    arg:register
 
 @dataclass
-class todo_inst(instruction):
-    inst:'None|instruction'=None
-
-    def str(self, i: idmap) -> tuple[str, ...]:
-        return self.inst.str(i)
+class await_inst(instruction):
+    target:register
+    arg:register
 
 @dataclass
 class binary_op_inst(instruction):
     op:str
-    reg:register
+    target:register
     arga:register
     argb:register
 
-    def str(self, i: idmap) -> tuple[str, ...]:
-        return i.idx(self), self.op, i.idx(self.reg), i.idx(self.arga), i.idx(self.argb)
+class compare_inst(binary_op_inst): pass
 
 @dataclass
 class unary_op_inst(instruction):
     op:str
-    reg:register
+    target:register
     arg:register
-
-    def str(self, i: idmap) -> tuple[str, ...]:
-        return i.idx(self), self.op, i.idx(self.reg), i.idx(self.arg)
 
 @dataclass
 class branch_inst(instruction):
-    invert:str
-    reg:register
-    branch:instruction
-    next:instruction
+    '''
+    go to next if reg is true;
+    go to branch if reg is false
+    '''
 
-    def str(self, i: idmap) -> tuple[str, ...]:
-        op = 'br-if-t' if self.invert else 'br-if-f'
-        return i.idx(self), op, i.idx(self.branch), i.idx(self.reg)
+    branch:instruction
+    test:register
+
+@dataclass
+class except_inst(instruction):
+    raise_to:'register|None'
+    exc_type:register
+    exc_value:register
+    exc_traceback:register
 
 @dataclass
 class exit_inst(instruction):
     code:register
     next:None
 
-    def str(self, i: idmap) -> tuple[str, ...]:
-        return i.idx(self), 'exit', i.idx(self.code)
+@dataclass
+class control:
+    raise_to:'instruction'
+    break_to:'instruction|None'=None
+    continue_to:'instruction|None'=None
+    return_to:'instruction|None'=None
+    yield_to:'instruction|None'=None
+    yields:bool=False
 
 class tree_node:
     def trc(self) -> trace:
         raise NotImplementedError(f'trc not implemented for {self.__class__.__name__}')
 
-    def itc(self, next:instruction, reg:register) -> instruction:
+    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         raise NotImplementedError(f'itc not implemented for {self.__class__.__name__}')
 
     def __str__(self):
         return str(self.trc())
-
-    def print_insts(self):
-        i = idmap()
-        inst = self.itc(exit_inst(None, reg := register()), reg)
-
-        while inst.next:
-            print(inst.str(i))
-            inst = inst.next
 
 nwlpat = re.compile(r'(\#[^\n]*| |\n)*\n')
 spcpat = re.compile(r' +')
@@ -165,29 +156,20 @@ class lextok(tree_node):
 class numtok(lextok):
     def trc(self) -> trace:
         return trace(f'num:"{self.str}"')
-    def itc(self, i: insts, reg: int):
-        if not (numidx := i.num_map.get(self.str)):
-            numidx = i._num; i._num += 1
-            i.num_map[numidx] = self.str
-        i.newinst(i.inst(), 'num', reg, numidx)
+    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
+        return number_inst(next, reg, self.str)
 
 class strtok(lextok):
     def trc(self) -> trace:
         return trace(f'str:"{self.str}"')
-    def itc(self, i: insts, reg: int):
-        if not (stridx := i.str_map.get(self.str)):
-            stridx = i._str; i._str += 1
-            i.str_map[stridx] = self.str
-        i.newinst(i.inst(), 'str', reg, stridx)
+    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
+        return string_inst(next, reg, self.str)
 
 class idftok(lextok):
     def trc(self) -> trace:
         return trace(f'idf:"{self.str}"')
-    def itc(self, i: insts, reg: int):
-        if not (idfidx := i.idf_map.get(self.str)):
-            idfidx = i._idf; i._idf += 1
-            i.idf_map[idfidx] = self.str
-        i.newinst(i.inst(), 'idf', reg, idfidx)
+    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
+        return identifier_inst(next, reg, self.str)
 
 class tabtok(lextok): pass
 class opstok(lextok): pass
