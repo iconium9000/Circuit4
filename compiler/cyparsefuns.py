@@ -226,12 +226,33 @@ def primary_r(p:parser):
     # TODO
     return p.rule(atom)
 
+def identifier_r(p:parser):
+    if tok := p.nexttok(idftok):
+        return identifier_n(tok.str)
+
+def number_r(p:parser):
+    if tok := p.nexttok(numtok):
+        return number_n(tok.str)
+
+def bool_ellipsis_r(p:parser):
+    if op := p.nextop({'True','False','None','...'}):
+        if op.str == '...': return ellipsis_n()
+        return bool_n(
+            True if op.str == 'True' else
+            False if op.str == 'False' else
+            None)
+
+def strings_r(p:parser):
+    def getstrs():
+        while tok := p.nexttok(strtok): yield tok.str
+    if p.gettok(strtok): return string_n(tuple(getstrs()))
+
 def atom(p:parser): return (
-    p.nexttok(idftok)
+    p.rule(identifier_r)
     or
-    p.nexttok(numtok)
+    p.rule(number_r)
     or
-    p.nextop({'True','False','None','...'})
+    p.rule(bool_ellipsis_r)
     or
     p.rule(strings_r)
     or
@@ -240,9 +261,6 @@ def atom(p:parser): return (
     p.rule(list_listcomp_r)
     or
     p.rule(dict_set_dictcomp_setcomp_r))
-
-@todo
-def strings_r(p:parser): pass
 
 @todo
 def tuple_group_genexp_r(p:parser): pass

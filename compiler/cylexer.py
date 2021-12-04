@@ -1,121 +1,6 @@
 # cylexer.py
-
-from dataclasses import dataclass
 import re
-from typing import Generator, Iterable, TypeVar
-
-@dataclass
-class trace:
-    opname:str
-    args:'tuple[trace, ...]|None'=None
-
-    def __str__(self):
-        if self.args:
-            return self.opname + '(' + ','.join(str(arg) for arg in self.args) + ')'
-        return self.opname
-
-T = TypeVar('T')
-def reverse(t:tuple[T, ...]): return (t[i] for i in range(len(t)-1, -1, -1))
-
-class idmap:
-    def __init__(self):
-        self._map:dict[int,str] = {}
-        self._idx = 0
-    
-    def idx(self, i:'instruction|register'):
-        if idx := self._map.get(id(i)):
-            return idx
-        self._idx += 1
-        idx = i.__class__.__name__[0] + str(self._idx)
-        self._map[id(i)] = idx
-        return idx
-
-class register: pass
-
-@dataclass
-class instruction:
-    next:'instruction'
-
-@dataclass
-class identifier_inst(instruction):
-    target:register
-    idf:str
-
-@dataclass
-class number_inst(instruction):
-    target:register
-    num:str
-
-@dataclass
-class string_inst(instruction):
-    target:register
-    string:str
-
-@dataclass
-class assign_inst(instruction):
-    target:register
-    arg:register
-
-@dataclass
-class await_inst(instruction):
-    target:register
-    arg:register
-
-@dataclass
-class binary_op_inst(instruction):
-    op:str
-    target:register
-    arga:register
-    argb:register
-
-class compare_inst(binary_op_inst): pass
-
-@dataclass
-class unary_op_inst(instruction):
-    op:str
-    target:register
-    arg:register
-
-@dataclass
-class branch_inst(instruction):
-    '''
-    go to next if reg is true;
-    go to branch if reg is false
-    '''
-
-    branch:instruction
-    test:register
-
-@dataclass
-class except_inst(instruction):
-    raise_to:'register|None'
-    exc_type:register
-    exc_value:register
-    exc_traceback:register
-
-@dataclass
-class exit_inst(instruction):
-    code:register
-    next:None
-
-@dataclass
-class control:
-    raise_to:'instruction'
-    break_to:'instruction|None'=None
-    continue_to:'instruction|None'=None
-    return_to:'instruction|None'=None
-    yield_to:'instruction|None'=None
-    yields:bool=False
-
-class tree_node:
-    def trc(self) -> trace:
-        raise NotImplementedError(f'trc not implemented for {self.__class__.__name__}')
-
-    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        raise NotImplementedError(f'itc not implemented for {self.__class__.__name__}')
-
-    def __str__(self):
-        return str(self.trc())
+from cycompiler import *
 
 nwlpat = re.compile(r'(\#[^\n]*| |\n)*\n')
 spcpat = re.compile(r' +')
@@ -146,41 +31,26 @@ keywords = {'raise', 'continue', 'as', 'in', 'is', 'else',
     'import', 'await', 'not', 'import', 'assert', 'if', 'from'}
 
 @dataclass
-class lextok(tree_node):
+class lextok:
     str:str
     slen:int
     tidx:int
     lnum:int
     lidx:int
 
-class numtok(lextok):
-    def trc(self) -> trace:
-        return trace(f'num:"{self.str}"')
-    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        return number_inst(next, reg, self.str)
-
-class strtok(lextok):
-    def trc(self) -> trace:
-        return trace(f'str:"{self.str}"')
-    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        return string_inst(next, reg, self.str)
-
-class idftok(lextok):
-    def trc(self) -> trace:
-        return trace(f'idf:"{self.str}"')
-    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        return identifier_inst(next, reg, self.str)
-
-class tabtok(lextok): pass
+class strtok(lextok): pass
+class idftok(lextok): pass
+class numtok(lextok): pass
 class opstok(lextok): pass
-class badtok(lextok): pass
+class tabtok(lextok): pass
 class endtok(lextok): pass
 
-class lexer(Iterable[lextok]):
+class lexer:
 
-    def __init__(self, file:str):
+    def __init__(self, filename:str, file:str):
+        self.filename = filename
         file = '\n' + file + '\n\n\\'
-        self.endidx = 0
+        self.fidx_end = 0
         self.file = str()
         self.lines:'list[str]' = []
 
@@ -202,21 +72,49 @@ class lexer(Iterable[lextok]):
             self.lines.append(line)
 
         self.filelen = len(self.file)
-        self.lidx = 0 # changes with iterator
+        self.lnum = 0 # changes with iterator
         self.tidx = 0 # changes with iterator
-        self.startidx = -1 # changes with iterator
+        self.fidx_start = -1 # changes with iterator
+
+        def gettoks():    
+            while self.fidx_start < self.fidx_end:
+                self.fidx_start = self.fidx_end
+                if info := self.strpat(): yield info
+                elif info := self.tabpat(): yield info
+                elif info := self.spcpat(): pass
+                elif info := self.idfpat(): yield info
+                elif info := self.opspat(): yield info
+                elif info := self.numpat(): yield info
+                elif info := self.badpat(): yield info
+                else:
+                    yield self.next(endtok, "EOF", self.filelen)
+                    return
+            self.error("lexer no move", self.lnum, self.lidx_start())
+        self.toks = tuple(gettoks())
     
+    def lidx(self, fidx:int):
+        return fidx - self.ls_fidxs[self.lnum]
+    
+    def lidx_start(self):
+        return self.fidx_start - self.ls_fidxs[self.lnum]
+
+    def error(self, msg:str, lnum:int, lidx:int):
+        print(f'File "{self.filename}", line {lnum}')
+        print(self.lines[lnum])
+        print(' ' * lidx + '^')
+        print(msg)
+        exit(-1)
+
     def next(self, t:type[lextok], pat:str, end:int):
-        self.endidx = end
-        while self.startidx > self.le_fidxs[self.lidx]:
-            self.lidx += 1
-        ls_fidx = self.ls_fidxs[self.lidx]
-        r = t(pat, len(pat), self.tidx, self.lidx, self.startidx - ls_fidx)
+        self.fidx_end = end
+        while self.fidx_start > self.le_fidxs[self.lnum]:
+            self.lnum += 1
+        r = t(pat, len(pat), self.tidx, self.lnum, self.lidx(self.fidx_start))
         self.tidx += 1
         return r
 
     def tabpat(self):
-        if m := nwlpat.match(self.file, self.endidx):
+        if m := nwlpat.match(self.file, self.fidx_end):
             if m2 := spcpat.match(self.file, m.end()):
                 s,e = m2.span()
                 pat = self.file[s:e]
@@ -224,61 +122,47 @@ class lexer(Iterable[lextok]):
             return self.next(tabtok, str(), m.end())
 
     def spcpat(self):
-        if m := spcpat.match(self.file, self.endidx):
-            self.endidx = m.end()
+        if m := spcpat.match(self.file, self.fidx_end):
+            self.fidx_end = m.end()
             return True
 
     def opspat(self):
-        if m := opspat.match(self.file, self.endidx):
+        if m := opspat.match(self.file, self.fidx_end):
             s,e = m.span()
             pat = self.file[s:e]
             return self.next(opstok, pat, e)
 
-    def strpat(self):
-        if m := strpat.match(self.file, self.endidx):
+    def strpat(self) -> 'lextok | None':
+        pat:str = str()
+        if m := strpat.match(self.file, self.fidx_end):
             s, e = m.span()
             c = self.file[s:e]
-            f,l,pat = '\\' + c, len(c), str()
+            f,l = '\\' + c, len(c)
             while 0 <= (i := self.file.find(f, e)):
                 pat += self.file[e:i] + c
                 e = i+1+l
             if 0 <= (i := self.file.find("'''", e)):
                 pat += self.file[e:i]
                 if l == 1 and 0 <= pat.find('\n'):
-                    return self.next(badtok, "unexpected newline in string", e+l)
+                    self.error("unexpected newline in string", self.lnum, self.lidx_start())
                 return self.next(strtok, pat, s, e+l)
-            return self.next(badtok, f'end string seq never found', len(self.file))
+            self.error("end string seq never found", self.lnum, self.lidx_start())
 
-    def idfpat(self):
-        if m := idfpat.match(self.file, self.endidx):
+    def idfpat(self) -> 'lextok | None':
+        if m := idfpat.match(self.file, self.fidx_end):
             s,e = m.span()
             pat = self.file[s:e]
             if pat in keywords:
                 return self.next(opstok, pat, e)
             return self.next(idftok, pat, e)
 
-    def numpat(self):
-        if m := numpat.match(self.file, self.endidx):
+    def numpat(self) -> 'lextok | None':
+        if m := numpat.match(self.file, self.fidx_end):
             s,e = m.span()
             pat = self.file[s:e]
             return self.next(numtok, pat, e)
 
-    def badpat(self):
-        if self.endidx < self.filelen:
-            pat = self.file[(s := self.endidx)]
-            return self.next(badtok, f'unexpected char "{pat}"', s, s+1)
-
-    def __iter__(self):
-        while self.startidx < self.endidx:
-            self.startidx = self.endidx
-            if info := self.strpat(): yield info
-            elif info := self.tabpat(): yield info
-            elif info := self.spcpat(): pass
-            elif info := self.idfpat(): yield info
-            elif info := self.opspat(): yield info
-            elif info := self.numpat(): yield info
-            elif info := self.badpat(): yield info
-            else:
-                yield self.next(endtok, "EOF", self.filelen)
-                return
-        yield self.next(badtok, "no-move", self.filelen)
+    def badpat(self) -> 'lextok | None':
+        if self.fidx_end < self.filelen:
+            pat = self.file[(s := self.fidx_end)]
+            self.error(f"unexpected char '{pat}'", self.lnum, self.lidx_start())
