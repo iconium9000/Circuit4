@@ -38,6 +38,7 @@ class control:
     yield_to:'instruction|None'=None
     yields:bool=False
 
+@dataclass
 class register: pass
 
 @dataclass
@@ -86,6 +87,7 @@ class binary_op_i(instruction):
     arga:register
     argb:register
 
+@dataclass
 class compare_i(binary_op_i): pass
 
 @dataclass
