@@ -10,24 +10,18 @@ class listmap(Generic[K,V]):
         self.map:dict[K,int] = {}
         self.list:list[V] = []
 
-    def __contains__(self, k:K):
-        return k in self.map
+    def __getitem__(self, k:K):
+        idx = self.map.get(k)
+        if idx is None: return idx
+        return self.list[idx]
 
-    def get(self, k:K):
-        if k in self.map:
-            return self.list[self.map[k]]
-
-    def add(self, k:K, v:V):
+    def __setitem__(self, k:K, v:V):
         if k in self.map:
             self.list[self.map[k]] = v
             return
 
         self.map[k] = len(self.list)
         self.list.append(v)
-    
-    def next(self, idx:int):
-        if idx < len(self.list):
-            return self.list[idx]
 
 def reverse(t:tuple[V, ...]): return (t[i] for i in range(len(t)-1, -1, -1))
 
@@ -97,11 +91,12 @@ class compile:
         self.empty_label = ' ' * self.max_label_len
 
     def label(self, i:base_instruction):
-        return self.labels.get(id(i)) or self.empty_label
+        idx = self.insts.map[id(i)]
+        return self.labels[idx] or self.empty_label
 
     def reg(self, r:register):
-        if id(r) not in self.regs:
-            self.regs.add(id(r), r)
+        if id(r) not in self.regs.map:
+            self.regs[id(r)] = r
         return '$' + str(self.regs.map[id(r)])
 
     def getstr(self, e:'base_instruction|register|str'):
@@ -119,43 +114,62 @@ class compile:
             if label: return label.ljust(self.max_label_len)
             else: return self.empty_label
 
-        for inst in self.insts.list:
-            label = self.labels.get(id(inst))
+        for idx,inst in enumerate(self.insts.list):
+            label = self.labels[idx]
             labelstr = getlabelstr(label)
             inststr = self.inststr(inst.elements())
             s += labelstr + ' ' + inststr + '\n'
-
         return s
 
-    def newlabel(self):
+    def newlabel(self, instidx:int):
+        if label := self.labels[instidx]: return
         idx = len(self.labels.list)
         label = '@' + str(idx)
         label_len = len(label)
         if self.max_label_len < label_len:
             self.max_label_len = label_len
-        return label
+        self.labels[instidx] = label
 
-    def checkinst(self, inst:base_instruction):
-        if id(inst) in self.labels:
-            return False
-        elif id(inst) in self.insts:
-            self.labels.add(id(inst), self.newlabel())
-            return False
-        self.insts.add(id(inst), inst)
-        if id(inst.next) in self.insts.map:
+    def catalog(self, inst:base_instruction) -> int:
+        next = inst
+        while next := self.checkinst(next): pass
+        return self.insts.map[id(inst)]
+
+    def checkinst(self, inst:base_instruction) -> 'base_instruction|None':
+        idx = self.insts.map.get(id(inst))
+        if idx is not None:
+            self.newlabel(idx)
+        elif isinstance(inst, jump_i):
+            idx = self.insts.map.get(id(inst.jump))
+            if idx is None:
+                self.insts.map[id(inst)] = self.catalog(inst.jump)
+                return
+            self.newlabel(idx)
+            self.insts[id(inst)] = inst
+        elif isinstance(inst, pass_i):
+            self.insts.map[id(inst)] = self.catalog(inst.next)
+        elif isinstance(inst, branch_i):
+            while isinstance(inst.branch, branch_i) and inst.branch.test == inst.test:
+                inst.branch = inst.branch.branch
+            while isinstance(inst.next, branch_i) and inst.next.test == inst.test:
+                inst.next = inst.next.branch
+            if inst.next == inst.branch:
+                if id(inst.branch.next) in self.insts.map:
+                    jump = jump_i(None, inst.branch)
+                else: jump = inst.branch.next
+                self.insts.map[id(inst)] = self.catalog(jump)
+            else:
+                self.insts[id(inst)] = inst
+                self.catalog(inst.next)
+                self.catalog(inst.branch)
+                self.checkinst(inst.branch)
+        else:
+            self.insts[id(inst)] = inst
+            if id(inst.next) not in self.insts.map:
+                return inst.next
             self.checkinst(inst.next)
             inst.next = jump_i(None, inst.next)
             self.checkinst(inst.next)
-        return True
-
-    def catalog(self, inst:base_instruction) -> None:
-        while inst and self.checkinst(inst):
-            if isinstance(binst := inst, branch_i):
-                self.catalog(binst.next)
-                self.catalog(binst.branch)
-                self.checkinst(binst.branch)
-                return
-            inst = inst.next
 
 @dataclass
 class pass_i(instruction):

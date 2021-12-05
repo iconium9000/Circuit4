@@ -93,8 +93,7 @@ class or_block_n(tree_node):
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         return_to = next
         for expr in reverse(self.exprs):
-            if return_to != next:
-                next = comp.branch_i(return_to, next, reg)
+            next = comp.branch_i(return_to, next, reg)
             next = expr.itc(ctrl, next, reg)
         return next
 
@@ -111,8 +110,7 @@ class and_block_n(tree_node):
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         return_to = next
         for expr in reverse(self.exprs):
-            if next != return_to:
-                next = comp.branch_i(next, return_to, reg)
+            next = comp.branch_i(next, return_to, reg)
             next = expr.itc(ctrl, next, reg)
         return next
 
@@ -137,8 +135,7 @@ class compare_n(tree_node):
         arga, argb = reg, register()
         for op, expr in reverse(self.compares):
             arga = register()
-            if return_to != next:
-                next = comp.branch_i(next, return_to, reg)
+            next = comp.branch_i(next, return_to, reg)
             next = comp.compare_i(next, op, reg, arga, argb)
             next = expr.itc(ctrl, next, argb)
             argb = arga
