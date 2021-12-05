@@ -23,15 +23,84 @@ def statements_r(p:parser):
         return cytree.statements_n(args)
 
 def statement_r(p:parser):
-    if p.gettok(lex.tabtok): return
+    if tab := p.gettok(lex.tabtok):
+        if tab.slen > p.indent: p.error("unexpected indent before statement")
+        elif tab.slen == p.indent: p.next()
     return p.rule(compound_stmt_r) or p.rule(simple_stmts_r)
 
 def compound_stmt_r(p:parser):
     if op := p.nextop(compound_stmt_map.keys()):
         return p.rule_err(compound_stmt_map[op.str], f'"{op.str}" invalid syntax')
 
+def simple_stmts_r(p:parser):
+    def getstmts():
+        while r := p.rule(simple_stmt_r):
+            yield r
+            if not p.nextop({';'}): break
+    if args := tuple(getstmts()):
+        if len(args) == 1: return args[0]
+        return cytree.statements_n(args)
+
+def simple_stmt_r(p:parser):
+    if op := p.nextop(simple_stmt_map.keys()):
+        return p.rule_err(simple_stmt_map[op.str], f'"{op.str}" invalid syntax')
+    return p.rule(assignment_r) or p.rule(star_expressions_r)
 @todo
-def simple_stmts_r(p:parser): pass
+def assignment_r(p:parser): pass
+
+def star_expressions_r(p:parser):
+    if r := p.rule(star_expression_r) or p.rule(expression_r):
+        def getexprs(r:cytree.tree_node):
+            while r and p.nextop({','}):
+                yield r
+                r = p.rule(star_expression_r) or p.rule(expression_r)
+        if args := tuple(getexprs()):
+            return cytree.tuple_n(args)
+        return r
+
+@todo
+def star_expression_r(p:parser):
+    return p.nextop({'*'}) and p.rule(bitwise_or_r)
+
+@todo
+def return_stmt_r(p:parser): pass
+@todo
+def import_name_r(p:parser): pass
+@todo
+def import_from_r(p:parser): pass
+@todo
+def raise_stmt_r(p:parser): pass
+@todo
+def import_stmt_r(p:parser): pass
+@todo
+def pass_stmt_r(p:parser): pass
+@todo
+def yield_stmt_r(p:parser): pass
+@todo
+def assert_stmt_r(p:parser): pass
+@todo
+def break_stmt_r(p:parser): pass
+@todo
+def continue_stmt_r(p:parser): pass
+@todo
+def global_stmt_r(p:parser): pass
+@todo
+def nonlocal_stmt_r(p:parser): pass
+
+simple_stmt_map = {
+    'return': return_stmt_r,
+    'import': import_name_r,
+    'import': import_from_r,
+    'raise': raise_stmt_r,
+    'import': import_stmt_r,
+    'pass': pass_stmt_r,
+    'yield': yield_stmt_r,
+    'assert': assert_stmt_r,
+    'break': break_stmt_r,
+    'continue': continue_stmt_r,
+    'global': global_stmt_r,
+    'nonlocal': nonlocal_stmt_r,
+}
 
 @todo
 def function_def_r(p:parser): pass
@@ -88,13 +157,13 @@ compound_stmt_map = {
     'match': match_stmt_r,
 }
 
-def assignment_expression(p:parser):
+def assignment_expression_r(p:parser):
     if (name_tok := p.nexttok(lex.idftok)) and p.nextop({':='}):
         expr = p.rule_err(expression_r, "no expression after ':=' operator")
         return cytree.assignment_n(expr, (name_tok,))
 
 def named_expression_r(p:parser):
-    return p.rule(assignment_expression) or p.rule(expression_r)
+    return p.rule(assignment_expression_r) or p.rule(expression_r)
 
 @todo
 def block_r(p:parser): pass
@@ -139,7 +208,6 @@ def inversion_r(p:parser):
     if p.nextop({'not'}):
         return cytree.unary_op_n('not', p.rule_err(inversion_r, "no inversion after 'not' operator"))
     return p.rule(comparison_r)
-
 
 def comparison_op_r(p:parser):
     if op := p.nextop({'is','not','in','>', '>=', '<', '<=', '!=', '=='}):
@@ -273,4 +341,3 @@ def list_listcomp_r(p:parser): pass
 
 @todo
 def dict_set_dictcomp_setcomp_r(p:parser): pass
-

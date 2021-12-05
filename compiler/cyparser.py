@@ -29,7 +29,7 @@ class parser:
             return ret
         self.tok = tok
 
-    def rule_err(self, rule:'Callable[[parser],tree_node|None]', err:str):
+    def rule_err(self, rule:'Callable[[parser],tree_node|None]', err:str) -> 'tree_node | NoReturn':
         return self.rule(rule) or self.error(err)
 
     def next(self):

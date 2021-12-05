@@ -10,8 +10,7 @@ def test():
         "a - b / c ** d // h is not -g"# - 'test' 'ing'"
         "% i != j == k > 17 > 3 and l or m or not not n")
     # p = cyparser.parser('test.py', 'a or b and c')
-    p.nexttok(lex.tabtok)
-    n = p.rule(funs.disjunction_r)
+    n = p.rule(funs.file_r)
     c = comp.compile(n.itc)
     print(c)
 

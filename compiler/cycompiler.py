@@ -190,6 +190,27 @@ class branch_i(instruction):
         return 'branch', self.branch, self.test
 
 @dataclass
+class star_i(instruction):
+    target:register
+    arg:register
+
+    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+        return 'star', self.target, self.arg
+    
+@dataclass
+class tuple_i(instruction):
+    target:register
+    args:tuple[register]
+
+    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+        return 'tuple', self.target, *self.args
+
+@dataclass
+class list_i(tuple_i):
+    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+        return 'list', self.target, *self.args
+
+@dataclass
 class except_i(instruction):
     raise_to:base_instruction
     exc_type:register

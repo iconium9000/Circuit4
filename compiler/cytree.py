@@ -30,7 +30,7 @@ class string_n(tree_node):
     strings:tuple[str]
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        regs = tuple(register() for _ in range(len(self.strings)))
+        regs = tuple(register() for _ in self.strings)
         next = comp.strings_i(next, reg, regs)
         for r,s in reverse(tuple(zip(regs, self.strings))):
             next = comp.string_i(next, r, s)
@@ -61,6 +61,36 @@ class statements_n(tree_node):
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         for expr in reverse(self.exprs):
+            next = expr.itc(ctrl, next, reg)
+        return next
+
+@dataclass
+class star_n(tree_node):
+    expr:tree_node
+
+    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
+        next = comp.star_i(next, reg, reg := register())
+        return self.expr.itc(ctrl, next, reg)
+
+@dataclass
+class tuple_n(tree_node):
+    exprs:tuple[tree_node]
+
+    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
+        regs = tuple(register() for _ in self.exprs)
+        next = comp.tuple_i(next, reg, regs)
+        for reg, expr in reverse(tuple(zip(regs, self.exprs))):
+            next = expr.itc(ctrl, next, reg)
+        return next
+
+@dataclass
+class list_n(tree_node):
+    exprs:tuple[tree_node]
+
+    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
+        regs = tuple(register() for _ in self.exprs)
+        next = comp.list_i(next, reg, regs)
+        for reg, expr in reverse(tuple(zip(regs, self.exprs))):
             next = expr.itc(ctrl, next, reg)
         return next
 
