@@ -135,6 +135,12 @@ class compile:
         while next := self.checkinst(next): pass
         return self.insts.map[id(inst)]
 
+    def jump_to(self, inst:base_instruction):
+        if id(inst) in self.insts.map:
+            self.newlabel(inst)
+            return jump_i(None, inst)
+        return inst
+
     def checkinst(self, inst:base_instruction) -> 'base_instruction|None':
         idx = self.insts.map.get(id(inst))
         if idx is not None:
@@ -143,33 +149,32 @@ class compile:
             idx = self.insts.map.get(id(inst.jump))
             if idx is None:
                 self.insts.map[id(inst)] = self.catalog(inst.jump)
-                return
-            self.newlabel(idx)
-            self.insts[id(inst)] = inst
+            else: self.newlabel(idx); self.insts[id(inst)] = inst
         elif isinstance(inst, pass_i):
+            inst.next = self.jump_to(inst.next)
             self.insts.map[id(inst)] = self.catalog(inst.next)
+        elif isinstance(inst, yield_i):
+            self.insts[id(inst)] = inst
+            inst.next = self.jump_to(inst.next)
+            self.catalog(inst.next)
+            self.newlabel(self.catalog(inst.yield_to))
         elif isinstance(inst, branch_i):
             while isinstance(inst.branch, branch_i) and inst.branch.test == inst.test:
                 inst.branch = inst.branch.branch
             while isinstance(inst.next, branch_i) and inst.next.test == inst.test:
-                inst.next = inst.next.branch
+                inst.next = inst.next.next
             if inst.next == inst.branch:
-                if id(inst.branch.next) in self.insts.map:
-                    jump = jump_i(None, inst.branch)
-                else: jump = inst.branch.next
+                jump = self.jump_to(inst.branch)
                 self.insts.map[id(inst)] = self.catalog(jump)
             else:
                 self.insts[id(inst)] = inst
+                inst.next = self.jump_to(inst.next)
                 self.catalog(inst.next)
-                self.catalog(inst.branch)
-                self.checkinst(inst.branch)
+                self.newlabel(self.catalog(inst.branch))
         else:
             self.insts[id(inst)] = inst
-            if id(inst.next) not in self.insts.map:
-                return inst.next
-            self.checkinst(inst.next)
-            inst.next = jump_i(None, inst.next)
-            self.checkinst(inst.next)
+            inst.next = self.jump_to(inst.next)
+            return inst.next
 
 @dataclass
 class pass_i(instruction):
@@ -190,12 +195,28 @@ class branch_i(instruction):
         return 'branch', self.branch, self.test
 
 @dataclass
+class yield_i(instruction):
+    yield_to:instruction
+    arg:register
+
+    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+        return 'yield', self.yield_to, self.arg
+
+@dataclass
 class star_i(instruction):
     target:register
     arg:register
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'star', self.target, self.arg
+
+@dataclass
+class hint_i(instruction):
+    target:register
+    arg:register
+
+    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+        return 'hint', self.target, self.arg
     
 @dataclass
 class tuple_i(instruction):

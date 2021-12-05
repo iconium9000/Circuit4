@@ -65,6 +65,26 @@ class statements_n(tree_node):
         return next
 
 @dataclass
+class yield_n(tree_node):
+    expr:tree_node
+
+    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
+        ctrl.yields = True
+        next = comp.bool_i(next, reg, None)
+        next = comp.yield_i(next, ctrl.yield_to, reg := register())
+        return self.expr.itc(ctrl, next, reg)
+
+@dataclass
+class hint_n(tree_node):
+    var:tree_node
+    hint:tree_node
+
+    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
+        next = comp.hint_i(next, reg, hint := register())
+        next = self.hint.itc(ctrl, next, hint)
+        return self.var.itc(ctrl, next, reg)
+
+@dataclass
 class star_n(tree_node):
     expr:tree_node
 

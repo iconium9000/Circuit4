@@ -45,8 +45,80 @@ def simple_stmt_r(p:parser):
     if op := p.nextop(simple_stmt_map.keys()):
         return p.rule_err(simple_stmt_map[op.str], f'"{op.str}" invalid syntax')
     return p.rule(assignment_r) or p.rule(star_expressions_r)
+
+def identifier_r(p:parser):
+    if name := p.nexttok(lex.idftok):
+        return cytree.identifier_n(name.str)
+
+def star_expression_r(p:parser):
+    return p.nextop({'*'}) and p.rule(bitwise_or_r)
+
 @todo
-def assignment_r(p:parser): pass
+def star_targets_r(p:parser):
+    pass
+
+def v_single_target_r(p:parser):
+    with indent_tracking(p, False):
+        if not (p.nextop({'('}) and (r := p.rule(single_target_r))):
+           return
+    p.nextop({')'}, "no ')' after single_target")
+    return r
+
+def single_target_r(p:parser): return (
+    p.rule(single_subscript_attribute_target_r)
+    or
+    p.rule(identifier_r)
+    or
+    p.rule(v_single_target_r))
+
+@todo
+def single_subscript_attribute_target_r(p:parser):
+    pass
+
+def named_assignment_r(p:parser):
+    if (target := 
+        p.rule(identifier_r)
+        or
+        p.rule(v_single_target_r)
+        or
+        p.rule(single_subscript_attribute_target_r)
+    ) and p.nextop({':'}):
+        hint = p.rule_err(expression_r, "no hint after ':' operator")
+        n = cytree.hint_n(target, hint)
+        if p.nextop({'='}):
+            expr = p.rule_err(annotated_rhs, "no annotated_rhs after '=' operrator")
+            return cytree.assignment_n(expr, (n,))
+        return n
+
+def target_assign_r(p:parser):
+    if (r := p.rule(star_targets_r)) and p.nextop({'='}):
+        return r
+
+def annotated_rhs(p:parser): return (
+    p.rule(yield_expr_r)
+    or
+    p.rule(star_expressions_r))
+
+def assignment_list_r(p:parser):
+    def gettargets():
+        while target := p.rule(target_assign_r):
+            yield target
+    if targets := tuple(gettargets()):
+        expr = p.rule_err(annotated_rhs, "no expression after '=' operator")
+        return cytree.assignment_n(expr, targets)
+
+augassign_ops = {'+=','-=','*=','@=','/=','%=','&=','|=','^=','<<=','>>=','**=','//=',}
+def augassign_r(p:parser):
+    if (target := p.rule(single_target_r)) and (op := p.nextop(augassign_ops)):
+        expr = p.rule_err(annotated_rhs, f"expected argument after '{op.str}' operator")
+        return cytree.binary_op_n(op.str, target, expr)
+
+def assignment_r(p:parser): return (
+    p.rule(named_assignment_r)
+    or
+    p.rule(assignment_list_r)
+    or
+    p.rule(augassign_r))
 
 def star_expressions_r(p:parser):
     if r := p.rule(star_expression_r) or p.rule(expression_r):
@@ -57,10 +129,6 @@ def star_expressions_r(p:parser):
         if args := tuple(getexprs()):
             return cytree.tuple_n(args)
         return r
-
-@todo
-def star_expression_r(p:parser):
-    return p.nextop({'*'}) and p.rule(bitwise_or_r)
 
 @todo
 def return_stmt_r(p:parser): pass
@@ -74,8 +142,20 @@ def raise_stmt_r(p:parser): pass
 def import_stmt_r(p:parser): pass
 @todo
 def pass_stmt_r(p:parser): pass
+
+def yield_expr_r(p:parser):
+    return p.nextop({'yield'}) and p.rule(yield_stmt_r)
+
 @todo
-def yield_stmt_r(p:parser): pass
+def yield_stmt_r(p:parser):
+    if p.nextop({'from'}):
+        r = p.rule_err(expression_r, f"no expression after 'yield from' operator")
+        r = cytree.star_n(r)
+        return cytree.yield_n(r)
+    elif r := p.rule(star_expressions_r):
+        return cytree.yield_n(r)
+    return cytree.yield_n(cytree.bool_n(None))
+
 @todo
 def assert_stmt_r(p:parser): pass
 @todo
@@ -158,9 +238,9 @@ compound_stmt_map = {
 }
 
 def assignment_expression_r(p:parser):
-    if (name_tok := p.nexttok(lex.idftok)) and p.nextop({':='}):
+    if (name := p.rule(identifier_r)) and p.nextop({':='}):
         expr = p.rule_err(expression_r, "no expression after ':=' operator")
-        return cytree.assignment_n(expr, (name_tok,))
+        return cytree.assignment_n(expr, (name,))
 
 def named_expression_r(p:parser):
     return p.rule(assignment_expression_r) or p.rule(expression_r)
@@ -296,10 +376,6 @@ def await_primary_r(p:parser):
 def primary_r(p:parser):
     # TODO
     return p.rule(atom)
-
-def identifier_r(p:parser):
-    if tok := p.nexttok(lex.idftok):
-        return cytree.identifier_n(tok.str)
 
 def number_r(p:parser):
     if tok := p.nexttok(lex.numtok):
