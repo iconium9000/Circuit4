@@ -13,7 +13,7 @@ class parser_manip(comp.control_manip):
         self.p.nexttok(lex.tabtok)
 
         self.n = self.p.rule_err(funs.disjunction_r, "failed to read file")
-        c = comp.compile(self)
+        c = comp.compiler(self)
         print(c)
     
     def itc(self, c: comp.control, i: comp.instruction, r: comp.register) -> comp.instruction:

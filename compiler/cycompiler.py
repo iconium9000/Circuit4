@@ -58,6 +58,14 @@ class base_instruction:
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'base',
 
+    def check(self, c:'compiler') -> 'base_instruction|None':
+        if self in c:
+            c.newlabel(c[self])
+            return
+        c.add(self)
+        self.next = c.jump_to(self.next)
+        return self.next
+
 @dataclass
 class instruction(base_instruction):
     next:base_instruction
@@ -84,7 +92,17 @@ class jump_i(base_instruction):
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'jump', self.jump
 
-class compile:
+    def check(self, c: 'compiler') -> 'base_instruction|None':
+        if self in c:
+            c.newlabel(c[self])
+        elif self.jump in c:
+            c.newlabel(c[self.jump])
+            c.add(self)
+        else:
+            c.catalog(self.jump)
+            c[self] = self.jump
+
+class compiler:
 
     def __init__(self, manip:control_manip):
         self.insts = listmap[int,base_instruction]()
@@ -104,9 +122,25 @@ class compile:
         self.catalog(inst)
         self.empty_label = ' ' * self.max_label_len
 
+    def add(self, i:base_instruction):
+        self.insts[id(i)] = i
+
+    def __contains__(self, i:base_instruction):
+        return id(i) in self.insts.map
+
+    def __setitem__(self, t:base_instruction, a:base_instruction):
+        if t in self:
+            idx = self[t]
+            self.insts.list[idx] = a
+            self.insts.map[id(a)] = idx
+        else:
+            self.insts.map[id(t)] = self.insts.map[id(a)]
+
+    def __getitem__(self, i:base_instruction):
+        return self.insts.map[id(i)]
+
     def label(self, i:base_instruction):
-        idx = self.insts.map[id(i)]
-        return self.labels[idx] or self.empty_label
+        return self.labels[self[i]] or self.empty_label
 
     def reg(self, r:register):
         if id(r) not in self.regs.map:
@@ -145,72 +179,33 @@ class compile:
         self.labels[instidx] = label
 
     def catalog(self, inst:base_instruction) -> int:
-        next = inst
-        while next := self.checkinst(next): pass
-        return self.insts.map[id(inst)]
+        while inst := inst.check(self): pass
 
-    def jump_to(self, inst:base_instruction):
-        idx = self.insts.map.get(id(inst))
-        if idx is None: return inst
-        self.newlabel(idx)
-        return jump_i(None, inst)
-
-    def checkinst(self, inst:base_instruction) -> 'base_instruction|None':
-        idx = self.insts.map.get(id(inst))
-        if idx is not None:
-            self.newlabel(idx)
-        elif isinstance(inst, jump_i):
-            idx = self.insts.map.get(id(inst.jump))
-            if idx is None:
-                self.insts.map[id(inst)] = self.catalog(inst.jump)
-            else: self.newlabel(idx); self.insts[id(inst)] = inst
-        elif isinstance(inst, (pass_i, comment_i)):
-            inst.next = self.jump_to(inst.next)
-            self.insts.map[id(inst)] = self.catalog(inst.next)
-        elif isinstance(inst, yield_i):
-            self.insts[id(inst)] = inst
-            inst.next = self.jump_to(inst.next)
-            self.catalog(inst.next)
-            self.newlabel(self.catalog(inst.yield_to))
-        elif isinstance(inst, branch_i):
-            while isinstance(inst.branch, branch_i) and inst.branch.test == inst.test:
-                inst.branch = inst.branch.branch
-            while isinstance(inst.next, branch_i) and inst.next.test == inst.test:
-                inst.next = inst.next.next
-            if inst.next == inst.branch:
-                jump = self.jump_to(inst.branch)
-                self.insts.map[id(inst)] = self.catalog(jump)
-            else:
-                if id(inst.next) in self.insts.map:
-                    if id(inst.branch) not in self.insts.map:
-                        test = register()
-                        not_inst = unary_op_i(inst, 'not', test, inst.test)
-                        branch = inst.branch
-                        inst.branch = inst.next
-                        inst.next = branch
-                        inst.test = test
-                        return self.checkinst(not_inst)
-
-                self.insts[id(inst)] = inst
-                inst.next = self.jump_to(inst.next)
-                self.catalog(inst.next)
-                self.newlabel(self.catalog(inst.branch))
-        else:
-            self.insts[id(inst)] = inst
-            inst.next = self.jump_to(inst.next)
-            return inst.next
-
-@dataclass
-class comment_i(instruction):
-    msg:str
-
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
-        return '# ' + self.msg,
+    def jump_to(self, i:base_instruction):
+        if i in self:
+            self.newlabel(self[i])
+            return jump_i(None, i)
+        return i
 
 @dataclass
 class pass_i(instruction):
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'pass',
+
+    def check(self, c: 'compiler') -> 'base_instruction|None':
+        if self in c:
+            c.newlabel(c[self.next])
+            return
+        self.next = c.jump_to(self.next)
+        c.catalog(self.next)
+        c[self] = self.next
+
+@dataclass
+class comment_i(pass_i):
+    msg:str
+
+    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+        return '# ' + self.msg,
 
 @dataclass
 class branch_i(instruction):
@@ -224,6 +219,35 @@ class branch_i(instruction):
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'if', self.branch, self.test
+    
+
+    def check(self, c: 'compiler') -> 'base_instruction|None':
+        if self in c:
+            c.newlabel(c[self])
+            return
+        while isinstance(self.branch, branch_i) and self.branch.test == self.test:
+            self.branch = self.branch.branch
+        while isinstance(self.next, branch_i) and self.next.test == self.test:
+            self.next = self.next.next
+        if self.next == self.branch:
+            jump = c.jump_to(self.branch)
+            c.catalog(jump)
+            c[self] = jump
+            return
+        elif self.next in c and self.branch not in c:
+            test = register()
+            not_inst = unary_op_i(self, 'not', test, self.test)
+            branch = self.branch
+            self.branch = self.next
+            self.next = branch
+            self.test = test
+            return not_inst
+
+        c.add(self)
+        self.next = c.jump_to(self.next)
+        c.catalog(self.next)
+        c.catalog(self.branch)
+        c.newlabel(c[self.branch])
 
 @dataclass
 class yield_i(instruction):
@@ -232,6 +256,18 @@ class yield_i(instruction):
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'yield', self.yield_to, self.arg
+
+    def check(self, c: 'compiler') -> 'base_instruction|None':
+        
+        if self in c:
+            c.newlabel(c[self])
+            return
+        c.add(self)
+        self.next = c.jump_to(self.next)
+        c.catalog(self.next)
+        c.catalog(self.yield_to)
+        c.newlabel(c[self.yield_to])
+
 
 @dataclass
 class star_i(instruction):
