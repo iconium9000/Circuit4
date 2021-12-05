@@ -58,13 +58,8 @@ class base_instruction:
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'base',
 
-    def check(self, c:'compiler') -> 'base_instruction|None':
-        if self in c:
-            c.checklabel(self)
-            return
-        c.add(self)
-        self.next = c.jump_to(self.next)
-        return self.next
+    def check(self, c: 'compiler') -> Iterable['base_instruction']:
+        raise NotImplementedError
 
 @dataclass
 class instruction(base_instruction):
@@ -73,6 +68,16 @@ class instruction(base_instruction):
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'inst'
 
+    def jump_to(self, c: 'compiler'):
+        if self.next in c:
+            self.next = jump_i(None, self.next)
+        return self.next.check(c)
+
+    def check(self, c: 'compiler'):
+        b = self in c
+        yield self
+        if not b: yield from self.jump_to(c)
+
 @dataclass
 class exit_i(base_instruction):
     next:None
@@ -80,6 +85,9 @@ class exit_i(base_instruction):
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'exit', self.code
+
+    def check(self, c: 'compiler') -> Iterable['base_instruction']:
+        yield self
 
 @dataclass
 class jump_i(base_instruction):
@@ -92,14 +100,15 @@ class jump_i(base_instruction):
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'jump', self.jump
 
-    def check(self, c: 'compiler') -> 'base_instruction|None':
+    def check(self, c: 'compiler') -> Iterable[base_instruction]:
         if self in c:
-            c.checklabel(self)
+            yield self
         elif self.jump in c:
-            c.checklabel(self.jump)
-            c.add(self)
+            if isinstance(self.jump, jump_i):
+                self.jump = self.jump.jump
+            yield self
         else:
-            c.catalog(self.jump)
+            yield from self.jump.check(c)
             c[self] = self.jump
 
 class compiler:
@@ -119,11 +128,10 @@ class compiler:
         inst = manip.itc(ctrl, pass_i(exit_to), exc_value)
 
         self.max_label_len = 0
-        self.catalog(inst)
+        for i in inst.check(self):
+            if i in self: self.checklabel(i)
+            else: self.insts[id(i)] = i
         self.empty_label = ' ' * self.max_label_len
-
-    def add(self, i:base_instruction):
-        self.insts[id(i)] = i
 
     def __contains__(self, i:base_instruction):
         return id(i) in self.insts.map
@@ -178,27 +186,16 @@ class compiler:
             self.max_label_len = label_len
         self.labels[self[i]] = label
 
-    def catalog(self, inst:base_instruction) -> int:
-        while inst := inst.check(self): pass
-
-    def jump_to(self, i:base_instruction):
-        if i in self:
-            self.checklabel(i)
-            return jump_i(None, i)
-        return i
-
 @dataclass
 class pass_i(instruction):
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'pass',
 
-    def check(self, c: 'compiler') -> 'base_instruction|None':
-        if self in c:
-            c.checklabel(self.next)
-            return
-        self.next = c.jump_to(self.next)
-        c.catalog(self.next)
-        c[self] = self.next
+    def check(self, c: 'compiler') -> Iterable[base_instruction]:
+        if self in c: return (yield self.next)
+        else:
+            yield from self.jump_to(c)
+            c[self] = self.next
 
 @dataclass
 class comment_i(pass_i):
@@ -219,35 +216,37 @@ class branch_i(instruction):
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'if', self.branch, self.test
-    
 
-    def check(self, c: 'compiler') -> 'base_instruction|None':
-        if self in c:
-            c.checklabel(self)
-            return
-        while isinstance(self.branch, branch_i) and self.branch.test == self.test:
-            self.branch = self.branch.branch
-        while isinstance(self.next, branch_i) and self.next.test == self.test:
-            self.next = self.next.next
-        if self.next == self.branch:
-            jump = c.jump_to(self.branch)
-            c.catalog(jump)
-            c[self] = jump
-            return
-        elif self.next in c and self.branch not in c:
-            test = register()
-            not_inst = unary_op_i(self, 'not', test, self.test)
-            branch = self.branch
-            self.branch = self.next
-            self.next = branch
-            self.test = test
-            return not_inst
+    def check(self, c: 'compiler') -> Iterable[base_instruction]:
+        if self in c: return (yield self)
 
-        c.add(self)
-        self.next = c.jump_to(self.next)
-        c.catalog(self.next)
-        c.catalog(self.branch)
-        c.checklabel(self.branch)
+        b:instruction = self.branch
+        while isinstance(b, branch_i) and b.test == self.test:
+            b = b.branch
+        self.branch = b
+
+        n:instruction = self.next
+        while isinstance(n, branch_i) and n.test == self.test:
+            n = n.next
+        self.next = n
+
+        if n == b:
+            if n in c:
+                yield (jump := jump_i(None, n))
+                c[self] = jump
+                yield from jump.check(c)
+            yield from self.jump_to(c)
+            c[self] = self.next
+        elif n in c and b not in c:
+            b = branch_i(b, n, test := register())
+            yield (not_inst := unary_op_i(b, 'not', test, self.test))
+            c[self] = not_inst
+            yield from not_inst.jump_to(c)
+        else:
+            yield self
+            yield from self.jump_to(c)
+            yield from b.check(c)
+            yield b
 
 @dataclass
 class yield_i(instruction):
@@ -257,15 +256,13 @@ class yield_i(instruction):
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'yield', self.yield_to, self.arg
 
-    def check(self, c: 'compiler') -> 'base_instruction|None':        
-        if self in c:
-            c.checklabel(self)
-            return
-        c.add(self)
+    def check(self, c: 'compiler') -> Iterable[base_instruction]:        
+        if self in c: return (yield self)
+        yield self
         self.next = c.jump_to(self.next)
-        c.catalog(self.next)
-        c.catalog(self.yield_to)
-        c.checklabel(self.yield_to)
+        yield from self.next.check(c)
+        yield from self.yield_to.check(c)
+        yield self.yield_to
 
 @dataclass
 class star_i(instruction):
