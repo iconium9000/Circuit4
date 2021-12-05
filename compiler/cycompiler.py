@@ -181,6 +181,16 @@ class compile:
                 jump = self.jump_to(inst.branch)
                 self.insts.map[id(inst)] = self.catalog(jump)
             else:
+                if id(inst.next) in self.insts.map:
+                    if id(inst.branch) not in self.insts.map:
+                        test = register()
+                        not_inst = unary_op_i(inst, 'not', test, inst.test)
+                        branch = inst.branch
+                        inst.branch = inst.next
+                        inst.next = branch
+                        inst.test = test
+                        return self.checkinst(not_inst)
+
                 self.insts[id(inst)] = inst
                 inst.next = self.jump_to(inst.next)
                 self.catalog(inst.next)
@@ -213,7 +223,7 @@ class branch_i(instruction):
     test:register
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
-        return 'branch', self.branch, self.test
+        return 'if', self.branch, self.test
 
 @dataclass
 class yield_i(instruction):
