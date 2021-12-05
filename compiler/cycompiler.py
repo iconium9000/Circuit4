@@ -60,7 +60,7 @@ class base_instruction:
 
     def check(self, c:'compiler') -> 'base_instruction|None':
         if self in c:
-            c.newlabel(c[self])
+            c.checklabel(self)
             return
         c.add(self)
         self.next = c.jump_to(self.next)
@@ -94,9 +94,9 @@ class jump_i(base_instruction):
 
     def check(self, c: 'compiler') -> 'base_instruction|None':
         if self in c:
-            c.newlabel(c[self])
+            c.checklabel(self)
         elif self.jump in c:
-            c.newlabel(c[self.jump])
+            c.checklabel(self.jump)
             c.add(self)
         else:
             c.catalog(self.jump)
@@ -169,21 +169,21 @@ class compiler:
             s += labelstr + ' ' + inststr + '\n'
         return s
 
-    def newlabel(self, instidx:int):
-        if label := self.labels[instidx]: return
+    def checklabel(self, i:base_instruction):
+        if self[i] in self.labels.map: return
         idx = len(self.labels.list)
         label = '@' + str(idx)
         label_len = len(label)
         if self.max_label_len < label_len:
             self.max_label_len = label_len
-        self.labels[instidx] = label
+        self.labels[self[i]] = label
 
     def catalog(self, inst:base_instruction) -> int:
         while inst := inst.check(self): pass
 
     def jump_to(self, i:base_instruction):
         if i in self:
-            self.newlabel(self[i])
+            self.checklabel(i)
             return jump_i(None, i)
         return i
 
@@ -194,7 +194,7 @@ class pass_i(instruction):
 
     def check(self, c: 'compiler') -> 'base_instruction|None':
         if self in c:
-            c.newlabel(c[self.next])
+            c.checklabel(self.next)
             return
         self.next = c.jump_to(self.next)
         c.catalog(self.next)
@@ -223,7 +223,7 @@ class branch_i(instruction):
 
     def check(self, c: 'compiler') -> 'base_instruction|None':
         if self in c:
-            c.newlabel(c[self])
+            c.checklabel(self)
             return
         while isinstance(self.branch, branch_i) and self.branch.test == self.test:
             self.branch = self.branch.branch
@@ -247,7 +247,7 @@ class branch_i(instruction):
         self.next = c.jump_to(self.next)
         c.catalog(self.next)
         c.catalog(self.branch)
-        c.newlabel(c[self.branch])
+        c.checklabel(self.branch)
 
 @dataclass
 class yield_i(instruction):
@@ -257,17 +257,15 @@ class yield_i(instruction):
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'yield', self.yield_to, self.arg
 
-    def check(self, c: 'compiler') -> 'base_instruction|None':
-        
+    def check(self, c: 'compiler') -> 'base_instruction|None':        
         if self in c:
-            c.newlabel(c[self])
+            c.checklabel(self)
             return
         c.add(self)
         self.next = c.jump_to(self.next)
         c.catalog(self.next)
         c.catalog(self.yield_to)
-        c.newlabel(c[self.yield_to])
-
+        c.checklabel(self.yield_to)
 
 @dataclass
 class star_i(instruction):
