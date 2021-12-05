@@ -60,10 +60,10 @@ class lexer:
         for line in file.split('\n'):
             self.ls_fidxs.append(fidx)
             if line and line[-1] == '\\':
-                line = line[:-1]
-                fidx += len(line)
+                subline = line[:-1]
+                fidx += len(subline)
                 tfidx = fidx
-                self.file += line
+                self.file += subline
             else:
                 tfidx = fidx + len(line)
                 self.file += line + '\n'

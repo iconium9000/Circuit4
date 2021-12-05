@@ -1,6 +1,6 @@
 # cycompiler.py
 from dataclasses import dataclass, astuple
-from typing import Callable, Generic, Iterable, TypeVar
+from typing import Callable, Generic, Iterable, NoReturn, TypeVar
 
 K = TypeVar('K')
 V = TypeVar('V')
@@ -25,14 +25,28 @@ class listmap(Generic[K,V]):
 
 def reverse(t:tuple[V, ...]): return (t[i] for i in range(len(t)-1, -1, -1))
 
+class control_manip:
+    def itc(self, c:'control', i:'instruction', r:'register') -> 'instruction':
+        raise NotImplementedError(c, i, r)
+    def error(self, msg:str, lnum:int, lidx:int) -> NoReturn:
+        raise NotImplementedError(msg, lnum, lidx)
+    def getlines(self, slnum:int, slidx:int, elnum:int, elidx) -> Iterable[str]:
+        raise NotImplementedError(slnum, slidx, elnum, elidx)
+
 @dataclass
 class control:
+    manip:control_manip
+    lnum:int
+    lidx:int
     raise_to:'instruction'
+    return_to:'instruction|None'=None
+    yields:bool=False
+    yield_to:'instruction|None'=None
     break_to:'instruction|None'=None
     continue_to:'instruction|None'=None
-    return_to:'instruction|None'=None
-    yield_to:'instruction|None'=None
-    yields:bool=False
+
+    def error(self, msg:str):
+        self.manip.error(msg, self.lnum, self.lidx)
 
 @dataclass
 class register: pass
@@ -72,7 +86,7 @@ class jump_i(base_instruction):
 
 class compile:
 
-    def __init__(self, itc:Callable[[control, instruction, register], instruction]):
+    def __init__(self, manip:control_manip):
         self.insts = listmap[int,base_instruction]()
         self.labels = listmap[int,str]()
         self.regs = listmap[int,register]()
@@ -83,8 +97,8 @@ class compile:
 
         exit_to = exit_i(None, exc_value)
         raise_to = except_i(exit_to, exit_to, exc_type, exc_value, exc_traceback)
-        ctrl = control(raise_to)
-        inst = itc(ctrl, pass_i(exit_to), exc_value)
+        ctrl = control(manip, 0, 0, raise_to)
+        inst = manip.itc(ctrl, pass_i(exit_to), exc_value)
 
         self.max_label_len = 0
         self.catalog(inst)
@@ -136,10 +150,10 @@ class compile:
         return self.insts.map[id(inst)]
 
     def jump_to(self, inst:base_instruction):
-        if id(inst) in self.insts.map:
-            self.newlabel(inst)
-            return jump_i(None, inst)
-        return inst
+        idx = self.insts.map.get(id(inst))
+        if idx is None: return inst
+        self.newlabel(idx)
+        return jump_i(None, inst)
 
     def checkinst(self, inst:base_instruction) -> 'base_instruction|None':
         idx = self.insts.map.get(id(inst))
@@ -150,7 +164,7 @@ class compile:
             if idx is None:
                 self.insts.map[id(inst)] = self.catalog(inst.jump)
             else: self.newlabel(idx); self.insts[id(inst)] = inst
-        elif isinstance(inst, pass_i):
+        elif isinstance(inst, (pass_i, comment_i)):
             inst.next = self.jump_to(inst.next)
             self.insts.map[id(inst)] = self.catalog(inst.next)
         elif isinstance(inst, yield_i):
@@ -175,6 +189,13 @@ class compile:
             self.insts[id(inst)] = inst
             inst.next = self.jump_to(inst.next)
             return inst.next
+
+@dataclass
+class comment_i(instruction):
+    msg:str
+
+    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+        return '# ' + self.msg,
 
 @dataclass
 class pass_i(instruction):

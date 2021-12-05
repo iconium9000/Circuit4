@@ -151,10 +151,8 @@ def yield_stmt_r(p:parser):
     if p.nextop({'from'}):
         r = p.rule_err(expression_r, f"no expression after 'yield from' operator")
         r = cytree.star_n(r)
-        return cytree.yield_n(r)
-    elif r := p.rule(star_expressions_r):
-        return cytree.yield_n(r)
-    return cytree.yield_n(cytree.bool_n(None))
+    else: r = p.rule(star_expressions_r) or cytree.bool_n(None)
+    return cytree.yield_n(r)
 
 @todo
 def assert_stmt_r(p:parser): pass

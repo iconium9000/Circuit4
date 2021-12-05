@@ -15,8 +15,16 @@ class tree_range(tree_node):
     next_tok:cylexer.lextok
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        # TODO HANDLE RANGE
-        return self.node.itc(ctrl, next, reg)
+        lnum, lidx = ctrl.lnum, ctrl.lidx
+        ctrl.lnum = self.start_tok.lnum
+        ctrl.lidx = self.start_tok.lidx
+        next = self.node.itc(ctrl, next, reg)        
+        ctrl.lnum, ctrl.lidx = lnum, lidx
+        s = self.start_tok
+        e = self.next_tok
+        lines = '\n'.join(ctrl.manip.getlines(s.lnum, s.lidx, e.lnum, e.lidx))
+        next = comp.comment_i(next, lines)
+        return next
 
 @dataclass
 class number_n(tree_node):
@@ -69,6 +77,8 @@ class yield_n(tree_node):
     expr:tree_node
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
+        if ctrl.yield_to is None:
+            ctrl.error("'yield' outside function")
         ctrl.yields = True
         next = comp.bool_i(next, reg, None)
         next = comp.yield_i(next, ctrl.yield_to, reg := register())
