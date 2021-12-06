@@ -14,7 +14,6 @@ class parser_manip(comp.control_manip):
 
         self.n = self.p.rule_err(funs.disjunction_r, "failed to read file")
         c = comp.compiler(self)
-        print(c)
     
     def itc(self, c: comp.control, i: comp.instruction, r: comp.register) -> comp.instruction:
         return self.n.itc(c, i, r)

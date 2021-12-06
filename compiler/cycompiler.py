@@ -49,6 +49,14 @@ class control:
         self.manip.error(msg, self.lnum, self.lidx)
 
 @dataclass
+class i_node:
+    inst:'base_instruction'
+    checked:bool=False
+    prev:'i_node|None'=None
+    next:'i_node|None'=None
+    undefined:'bool'=False
+
+@dataclass
 class register: pass
 
 @dataclass
@@ -58,8 +66,75 @@ class base_instruction:
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'base',
 
-    def check(self, c: 'compiler') -> Iterable['base_instruction']:
+    def newnode(self, c: 'compiler') -> i_node:
         raise NotImplementedError
+
+    def checknext(self, c: 'compiler', n: i_node):
+        raise NotImplementedError
+
+class compiler:
+
+    def __init__(self, manip:control_manip):
+        self.i_nodes:dict[int,i_node] = {}
+        self.stack:list[base_instruction] = []
+
+        self.labels = listmap[int,i_node]()
+        self.registers = listmap[int,register]()
+
+        exc_value = register()
+        exc_type = register()
+        exc_traceback = register()
+
+        exit_to = exit_i(None, exc_value)
+        raise_to = except_i(exit_to, exit_to, exc_type, exc_value, exc_traceback)
+        ctrl = control(manip, 0, 0, raise_to)
+        inst = manip.itc(ctrl, pass_i(exit_to), exc_value)
+
+        root = self.getnode(inst)
+        self.addlabel(root)
+        while self.stack and (i := self.stack.pop()):
+            if not (n := self.i_nodes[id(i)]).checked:
+                n.checked = True
+                i.checknext(self, n)
+
+        for i in self.getinsts():
+            print(self.getstr(i), *(self.getstr(s) for s in i.elements()))
+
+    def getinsts(self):
+        for n in self.labels.list:
+            if n.prev is not None: continue
+            while n: yield n.inst; n = n.next
+
+    def getstr(self, s:'str|base_instruction|register'):
+        if isinstance(s, base_instruction):
+            s = self.label(s)
+        elif isinstance(s, register):
+            s = self.reg(s)
+        return s.ljust(7)
+
+    def label(self, i:base_instruction):
+        n = self.i_nodes[id(i)]
+        # self.labels[id(n)] = n
+        idx = self.labels.map.get(id(n))
+        if idx is None: return '  '
+        return '@' + str(idx)
+
+    def reg(self, r:register):
+        self.registers[id(r)] = r
+        idx = self.registers.map[id(r)]
+        return '$' + str(idx)
+
+    def addlabel(self, n:i_node):
+        self.labels[id(n)] = n
+
+    def getnode(self, i:base_instruction):
+        n = self.i_nodes.get(id(i)) or i.newnode(self)
+        assert not n.undefined
+        return n
+
+    def setnode(self, i:base_instruction, n:i_node):
+        self.i_nodes[id(i)] = n
+        return n
 
 @dataclass
 class instruction(base_instruction):
@@ -67,16 +142,29 @@ class instruction(base_instruction):
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'inst'
+    
+    def newnode(self, c: 'compiler') -> i_node:
+        c.stack.append(self)
+        return c.setnode(self, i_node(self))
 
-    def jump_to(self, c: 'compiler'):
-        if self.next in c:
-            self.next = jump_i(None, self.next)
-        return self.next.check(c)
+    def checknext(self, c: 'compiler', n: i_node):
+        n.next = c.getnode(self.next)
+        if n.next.prev is not None:
+            c.addlabel(n.next)
+            self.next = j = jump_i(None, n.next.inst)
+            n.next = c.setnode(j, i_node(j))
+        n.next.prev = n
+        return n
 
-    def check(self, c: 'compiler'):
-        b = self in c
-        yield self
-        if not b: yield from self.jump_to(c)
+@dataclass
+class hang_i(base_instruction):
+    '''
+    loop indefinitely
+    '''
+    next:None=None
+
+    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+        return 'hang',
 
 @dataclass
 class exit_i(base_instruction):
@@ -86,8 +174,8 @@ class exit_i(base_instruction):
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'exit', self.code
 
-    def check(self, c: 'compiler') -> Iterable['base_instruction']:
-        yield self
+    def newnode(self, c: 'compiler') -> i_node:
+        return c.setnode(self, i_node(self))
 
 @dataclass
 class jump_i(base_instruction):
@@ -99,106 +187,20 @@ class jump_i(base_instruction):
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'jump', self.jump
-
-    def check(self, c: 'compiler') -> Iterable[base_instruction]:
-        if self in c:
-            yield self
-        elif self.jump in c:
-            if isinstance(self.jump, jump_i):
-                self.jump = self.jump.jump
-            yield self
-        else:
-            yield from self.jump.check(c)
-            c[self] = self.jump
-
-class compiler:
-
-    def __init__(self, manip:control_manip):
-        self.insts = listmap[int,base_instruction]()
-        self.labels = listmap[int,str]()
-        self.regs = listmap[int,register]()
-
-        exc_value = register()
-        exc_type = register()
-        exc_traceback = register()
-
-        exit_to = exit_i(None, exc_value)
-        raise_to = except_i(exit_to, exit_to, exc_type, exc_value, exc_traceback)
-        ctrl = control(manip, 0, 0, raise_to)
-        inst = manip.itc(ctrl, pass_i(exit_to), exc_value)
-
-        self.max_label_len = 0
-        for i in inst.check(self):
-            if i in self: self.checklabel(i)
-            else: self.insts[id(i)] = i
-        self.empty_label = ' ' * self.max_label_len
-
-    def __contains__(self, i:base_instruction):
-        return id(i) in self.insts.map
-
-    def __setitem__(self, t:base_instruction, a:base_instruction):
-        if t in self:
-            idx = self[t]
-            self.insts.list[idx] = a
-            self.insts.map[id(a)] = idx
-        else:
-            self.insts.map[id(t)] = self.insts.map[id(a)]
-
-    def __getitem__(self, i:base_instruction):
-        return self.insts.map[id(i)]
-
-    def label(self, i:base_instruction):
-        return self.labels[self[i]] or self.empty_label
-
-    def reg(self, r:register):
-        if id(r) not in self.regs.map:
-            self.regs[id(r)] = r
-        return '$' + str(self.regs.map[id(r)])
-
-    def getstr(self, e:'base_instruction|register|str'):
-        if isinstance(e, base_instruction): return self.label(e)
-        if isinstance(e, register): return self.reg(e)
-        return e
-
-    def inststr(self, i:Iterable[str]):
-        return ' '.join(self.getstr(e).ljust(7) for e in i)
-
-    def __str__(self):
-        s = 'Compiled output:\n'
-
-        def getlabelstr(label:str):
-            if label: return label.ljust(self.max_label_len)
-            else: return self.empty_label
-
-        for idx,inst in enumerate(self.insts.list):
-            label = self.labels[idx]
-            labelstr = getlabelstr(label)
-            inststr = self.inststr(inst.elements())
-            s += labelstr + ' ' + inststr + '\n'
-        return s
-
-    def checklabel(self, i:base_instruction):
-        if self[i] in self.labels.map: return
-        idx = len(self.labels.list)
-        label = '@' + str(idx)
-        label_len = len(label)
-        if self.max_label_len < label_len:
-            self.max_label_len = label_len
-        self.labels[self[i]] = label
+    
+    def newnode(self, c: 'compiler') -> i_node:
+        return c.setnode(self, c.getnode(self.jump))
 
 @dataclass
 class pass_i(instruction):
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'pass',
-
-    def check(self, c: 'compiler') -> Iterable[base_instruction]:
-        if self in c: return (yield self.next)
-        else:
-            yield from self.jump_to(c)
-            c[self] = self.next
+    
+    def newnode(self, c: 'compiler') -> i_node:
+        return c.setnode(self, c.getnode(self.next))
 
 @dataclass
-class comment_i(pass_i):
+class comment_i(instruction):#(pass_i):
     msg:str
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
@@ -217,36 +219,32 @@ class branch_i(instruction):
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'if', self.branch, self.test
 
-    def check(self, c: 'compiler') -> Iterable[base_instruction]:
-        if self in c: return (yield self)
+    def newnode(self, c: 'compiler') -> i_node:
+        self_n = c.setnode(self, i_node(self, undefined=True))
+        branch_n = c.getnode(self.branch)
+        next_n = c.getnode(self.next)
 
-        b:instruction = self.branch
-        while isinstance(b, branch_i) and b.test == self.test:
-            b = b.branch
-        self.branch = b
+        if isinstance(i := branch_n.inst, branch_i) and i.test == self.test:
+            self.branch = i.branch
+            branch_n = c.getnode(i)
+        
+        if isinstance(i := next_n.inst, branch_i) and i.test == self.test:
+            self.next = i.next
+            next_n = c.getnode(i)
 
-        n:instruction = self.next
-        while isinstance(n, branch_i) and n.test == self.test:
-            n = n.next
-        self.next = n
+        if branch_n == next_n:
+            return c.setnode(self, branch_n)
+        
+        if branch_n.prev is None and next_n.prev is not None:
+            br = branch_i(branch_n.inst, next_n.inst, reg := register())
+            i = unary_op_i(br, 'not', reg, self.test)
+            return c.setnode(self, c.getnode(i))
 
-        if n == b:
-            if n in c:
-                yield (jump := jump_i(None, n))
-                c[self] = jump
-                yield from jump.check(c)
-            yield from self.jump_to(c)
-            c[self] = self.next
-        elif n in c and b not in c:
-            b = branch_i(b, n, test := register())
-            yield (not_inst := unary_op_i(b, 'not', test, self.test))
-            c[self] = not_inst
-            yield from not_inst.jump_to(c)
-        else:
-            yield self
-            yield from self.jump_to(c)
-            yield from b.check(c)
-            yield b
+        c.addlabel(branch_n)
+
+        self_n.undefined = False
+        c.stack.append(self)
+        return self_n
 
 @dataclass
 class yield_i(instruction):
@@ -255,14 +253,6 @@ class yield_i(instruction):
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'yield', self.yield_to, self.arg
-
-    def check(self, c: 'compiler') -> Iterable[base_instruction]:        
-        if self in c: return (yield self)
-        yield self
-        self.next = c.jump_to(self.next)
-        yield from self.next.check(c)
-        yield from self.yield_to.check(c)
-        yield self.yield_to
 
 @dataclass
 class star_i(instruction):
@@ -279,7 +269,7 @@ class hint_i(instruction):
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'hint', self.target, self.arg
-    
+
 @dataclass
 class tuple_i(instruction):
     target:register
@@ -357,7 +347,6 @@ class identifier_i(instruction):
 
     def elements(self) -> 'tuple[str|base_instruction|register, ...]':
         return 'idf', self.target, self.idf
-
 
 @dataclass
 class string_i(instruction):
