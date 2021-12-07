@@ -157,6 +157,8 @@ class for_expr_n(tree_node):
 class generator_n(tree_node):
     stmt:tree_node
 
+    # TODO itc
+
 @dataclass
 class or_block_n(tree_node):
     '''
