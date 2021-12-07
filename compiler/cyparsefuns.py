@@ -53,9 +53,22 @@ def identifier_r(p:parser):
 def star_expression_r(p:parser):
     return p.nextop({'*'}) and p.rule(bitwise_or_r)
 
-@todo
+def star_target_r(p:parser):
+    if not p.nextop({'*'}):
+        return p.rule(target_with_star_atom_r)
+    elif p.getop({'*'}):
+        p.error("second '*' tokens not supported here")
+    elif r := p.rule(target_with_star_atom_r):
+        return cytree.star_n(r)
+
 def star_targets_r(p:parser):
-    pass
+    def gettargets():
+        if r := p.rule(star_target_r):
+            yield r
+            while p.nextop({','}) and (r := p.rule(star_target_r)):
+                yield r
+    if args := tuple(gettargets()):
+        return cytree.targets_n(args)
 
 def v_single_target_r(p:parser):
     with indent_tracking(p, False):
@@ -63,6 +76,55 @@ def v_single_target_r(p:parser):
            return
     p.nextop({')'}, "no ')' after single_target")
     return r
+
+def target_with_star_atom_r(p:parser): return (
+    p.rule(single_subscript_attribute_target_r)
+    or
+    p.rule(identifier_r)
+    or
+    p.rule(star_atom_r))
+
+def p_target_with_star_atom_r(p:parser):
+    if not p.getop({'('}): return
+    with indent_tracking(p, False):
+        p.next()
+        r = p.rule(target_with_star_atom_r)
+    return p.nextop({')'}) and r
+
+def p_star_targets_tuple_seq_r(p:parser):
+    if not p.getop({'('}): return
+    with indent_tracking(p, False):
+        p.next()
+        r = p.rule(star_targets_tuple_seq_r)
+    if p.nextop({')'}): return r or cytree.tuple_n(tuple())
+
+def star_atom_r(p:parser): return (
+    p.rule(p_target_with_star_atom_r)
+    or
+    p.rule(p_star_targets_tuple_seq_r)
+    or
+    p.rule(star_targets_list_seq_r))
+
+def star_targets_tuple_seq_r(p:parser):
+    def gettargets():
+        if (r := p.rule(star_target_r)) and (op := p.nextop({','})):
+            yield r
+            while op and (r := p.rule(star_target_r)):
+                yield r
+                op = p.nextop({','})
+    if args := tuple(gettargets()):
+        return cytree.tuple_n(args)
+
+def star_targets_list_seq_r(p:parser):
+    def gettargets():
+        op = p.next() # assume '['
+        while op and (r := p.rule(star_target_r)):
+            yield r
+            op = p.nextop({','})
+    if not p.getop({'['}): return
+    with indent_tracking(p, False):
+        r = cytree.list_n(tuple(gettargets()))
+    return p.nextop({']'}) and r
 
 def single_target_r(p:parser): return (
     p.rule(single_subscript_attribute_target_r)
@@ -72,17 +134,73 @@ def single_target_r(p:parser): return (
     p.rule(v_single_target_r))
 
 @todo
-def single_subscript_attribute_target_r(p:parser):
+def p_arguments_r(p:parser):
+    p.next() # assume '('
     pass
 
+
+def primary_r(p:parser):
+    def get_primary_r(p:parser):
+        if tok.str == '.':
+            p.next()
+            if n := p.nexttok(lex.idftok):
+                return cytree.attribute_ref_n(r, n.str)
+        elif tok.str == '[':
+            if s := p.rule(slices_r):
+                return cytree.subscript_n(r, s)
+        elif n := p.rule(genexp_r) or p.rule(p_arguments_r):
+            return cytree.call_n(r, n)
+    if r_next := p.rule(atom_r):
+        r = r_next
+        t_next = p.getop({'.','[','('})
+        if not t_next: return r
+        tok = t_next
+        while (r_next := p.rule(get_primary_r)):
+            tok = p.getop({'.','[','('})
+            r = r_next
+        return tok and r
+
+def t_primary_r(p:parser):
+    def get_primary_r(p:parser):
+        if tok.str == '.':
+            p.next()
+            if n := p.nexttok(lex.idftok):
+                return cytree.attribute_ref_n(r, n.str)
+        elif tok.str == '[':
+            if s := p.rule(slices_r):
+                return cytree.subscript_n(r, s)
+        elif n := p.rule(genexp_r) or p.rule(p_arguments_r):
+            return cytree.call_n(r, n)
+    if ((r_next := p.rule(atom_r))
+    and
+    (tok := p.getop({'.','[','('}))):
+        r = r_next
+        while (
+            (r_next := p.rule(get_primary_r))
+            and
+            (tok := p.getop({'.','[','('}))
+        ): r = r_next
+        return tok and r
+
+def single_subscript_attribute_target_r(p:parser):
+    if r := p.rule(t_primary_r):
+        op:lex.opstok = p.nextop({'.','['})
+        if op.str == '.':
+            n = p.nexttok(lex.idftok, "expected identifier after '.' operator")
+            r = cytree.attribute_ref_n(r, n.str)
+        else: # TODO
+            s = p.rule_err(slices_r, "syntax error with slice rule")
+            r = cytree.subscript_n(r, s)
+        if not p.nextop({'.','[','('}):
+            return r
+
 def named_assignment_r(p:parser):
-    if (target := 
-        p.rule(identifier_r)
+    target = (p.rule(identifier_r)
         or
         p.rule(v_single_target_r)
         or
-        p.rule(single_subscript_attribute_target_r)
-    ) and p.nextop({':'}):
+        p.rule(single_subscript_attribute_target_r))
+    if target and p.nextop({':'}):
         hint = p.rule_err(expression_r, "no hint after ':' operator")
         n = cytree.hint_n(target, hint)
         if p.nextop({'='}):
@@ -131,23 +249,29 @@ def star_expressions_r(p:parser):
         return r
 
 @todo
-def return_stmt_r(p:parser): pass
+def return_stmt_r(p:parser):
+    pass # assumes previous tok was 'return' op
 @todo
-def import_name_r(p:parser): pass
+def import_name_r(p:parser):
+    pass # assumes previous tok was 'import' op
 @todo
-def import_from_r(p:parser): pass
+def import_from_r(p:parser):
+    pass # assumes previous tok was 'import' op
 @todo
-def raise_stmt_r(p:parser): pass
+def raise_stmt_r(p:parser):
+    pass # assumes previous tok was 'raise' op
 @todo
-def import_stmt_r(p:parser): pass
+def import_stmt_r(p:parser):
+    pass # assumes previous tok was 'import' op
 @todo
-def pass_stmt_r(p:parser): pass
+def pass_stmt_r(p:parser):
+    pass # assumes previous tok was 'pass' op
 
 def yield_expr_r(p:parser):
     return p.nextop({'yield'}) and p.rule(yield_stmt_r)
 
-@todo
 def yield_stmt_r(p:parser):
+    # assumes previous tok was 'yield' op
     if p.nextop({'from'}):
         r = p.rule_err(expression_r, f"no expression after 'yield from' operator")
         r = cytree.star_n(r)
@@ -155,15 +279,20 @@ def yield_stmt_r(p:parser):
     return cytree.yield_n(r)
 
 @todo
-def assert_stmt_r(p:parser): pass
+def assert_stmt_r(p:parser):
+    pass # assumes previous tok was 'assert' op
 @todo
-def break_stmt_r(p:parser): pass
+def break_stmt_r(p:parser):
+    pass # assumes previous tok was 'break' op
 @todo
-def continue_stmt_r(p:parser): pass
+def continue_stmt_r(p:parser):
+    pass # assumes previous tok was 'continue' op
 @todo
-def global_stmt_r(p:parser): pass
+def global_stmt_r(p:parser):
+    pass # assumes previous tok was 'global' op
 @todo
-def nonlocal_stmt_r(p:parser): pass
+def nonlocal_stmt_r(p:parser):
+    pass # assumes previous tok was 'nonlocal' op
 
 simple_stmt_map = {
     'return': return_stmt_r,
@@ -184,8 +313,8 @@ simple_stmt_map = {
 def function_def_r(p:parser): pass
 
 def if_stmt_r(p:parser):
-
     def getblocks():
+        # assumes previous tok was 'if' op
         if_test = p.rule_err(named_expression_r, "missing 'if case'")
         p.nextop({':'}, "missing ':'")
         if_block = p.rule_err(block_r, "missing if block")
@@ -205,17 +334,23 @@ def if_stmt_r(p:parser):
     return cytree.or_block_n(tuple(getblocks()))
 
 @todo
-def class_def_r(p:parser): pass
+def class_def_r(p:parser):
+    pass # assumes previous tok was 'class' op
 @todo
-def with_stmt_r(p:parser): pass
+def with_stmt_r(p:parser):
+    pass # assumes previous tok was 'with' op
 @todo
-def for_stmt_r(p:parser): pass
+def for_stmt_r(p:parser):
+    pass # assumes previous tok was 'for' op
 @todo
-def try_stmt_r(p:parser): pass
+def try_stmt_r(p:parser):
+    pass # assumes previous tok was 'try' op
 @todo
-def while_stmt_r(p:parser): pass
+def while_stmt_r(p:parser):
+    pass # assumes previous tok was 'while' op
 @todo
-def match_stmt_r(p:parser): pass
+def match_stmt_r(p:parser):
+    pass # assumes previous tok was 'match' op
 
 @todo
 def decorator_stmt_r(p:parser): pass
@@ -371,9 +506,29 @@ def await_primary_r(p:parser):
         return cytree.await_n(p.rule_err(primary_r), f"no primary after 'await' operator")
     return p.rule(primary_r)
 
-def primary_r(p:parser):
-    # TODO
-    return p.rule(atom)
+def slice_r(p:parser):
+    a1 = p.rule(expression_r)
+    if p.nextop({':'}):
+        a2 = p.rule(expression_r)
+        a3 = p.nextop({':'}) and p.rule(expression_r)
+        return cytree.slice_n(a1,a2,a3)
+
+def slices_r(p:parser):
+    def getslices(r:cytree.tree_node):
+        op = r
+        while r:
+            yield r
+            r = op and (p.rule(slice_r) or p.rule(named_expression_r))
+            op = r and p.nextop({','})
+        if r: yield r
+    with indent_tracking(p, False):
+        p.next() # assume '['
+        r = p.rule(slice_r) or p.rule(named_expression_r)
+        if not r: return
+        elif op := p.getop({','}):
+            r = cytree.tuple_n(tuple(getslices(r)))
+    p.nextop({']'}, "expected ']' after slices")
+    return r
 
 def number_r(p:parser):
     if tok := p.nexttok(lex.numtok):
@@ -392,26 +547,110 @@ def strings_r(p:parser):
         while tok := p.nexttok(lex.strtok): yield tok.str
     if p.gettok(lex.strtok): return cytree.string_n(tuple(getstrs()))
 
-def atom(p:parser): return (
-    p.rule(identifier_r)
-    or
-    p.rule(number_r)
-    or
-    p.rule(bool_ellipsis_r)
-    or
-    p.rule(strings_r)
-    or
-    p.rule(tuple_group_genexp_r)
-    or
-    p.rule(list_listcomp_r)
-    or
-    p.rule(dict_set_dictcomp_setcomp_r))
+def star_named_expression_r(p:parser):
+    if p.nextop({'*'}):
+        r = p.rule(bitwise_or_r)
+        return r and cytree.star_n(r)
+    return p.rule(named_expression_r)
 
-@todo
-def tuple_group_genexp_r(p:parser): pass
+def star_named_expression_gr(p:parser):    
+    op = True
+    while op and (r := p.rule(star_named_expression_r)):
+        yield r; op = p.nextop({','})
 
-@todo
-def list_listcomp_r(p:parser): pass
+def tuple_r(p:parser):
+    with indent_tracking(p, False):
+        p.next() # assume '('
+        r = p.rule(star_named_expression_r)
+        if not p.nextop({','}): return
+        t = r, *star_named_expression_gr(p)
+    return p.nextop({')'}) and cytree.tuple_n(t)
+
+def group_r(p:parser):
+    with indent_tracking(p, False):
+        p.next() # assume '('
+        r = p.rule(yield_expr_r) or p.rule(named_expression_r)
+    return p.nextop({')'}) and r
+
+def for_if_clauses_ir(i:cytree.tree_node):
+    def if_clause_r(p:parser):
+        if p.nextop({'if'}) and (test := p.rule(disjunction_r)):
+            r = p.rule(for_clause_r) or p.rule(if_clause_r) or i
+            return cytree.if_expr_n(test, r)
+
+    def for_clause_r(p:parser):
+        fail = False
+        if ((op := p.nextop({'async','for'}))
+        and
+        (op.str == 'for' or p.nextop({'for'}))
+        and
+        (t := p.rule(star_targets_r))
+        and
+        p.nextop({'in'})
+        and
+        (fail := True)
+        and
+        (i := p.rule(disjunction_r))):
+            e = p.rule(for_clause_r) or p.rule(if_clause_r) or i
+            r = cytree.for_expr_n(t, i, e)
+            if op.str == 'async':
+                return cytree.async_n(r)
+            return r
+        if fail: p.error("expected disjunction after 'in' operator")
+    return for_clause_r
+
+def genexp_r(p:parser):
+    with indent_tracking(p, False):
+        p.next() # assume '('
+        i = p.rule(assignment_expression_r)
+        if not i:
+            i = p.rule(expression_r)
+            if not i or p.getop({':='}): return
+        r = p.rule(for_if_clauses_ir(cytree.yield_n(i)))
+    if r and p.nextop({')'}):
+        return cytree.generator_n(r)
+
+def tuple_group_genexp_r(p:parser):
+    if not p.getop({'('}): return
+    return p.rule(tuple_r) or p.rule(group_r) or p.rule(genexp_r)
+
+def list_r(p:parser):
+    with indent_tracking(p, False):
+        p.next() # assume '['
+        t = tuple(star_named_expression_gr(p))
+    return p.nextop({']'}) and cytree.list_n(t)
+
+def listcomp_r(p:parser):
+    with indent_tracking(p, False):
+        p.next() # assume '['
+        i = p.rule(named_expression_r)
+        if not i: return
+        i = cytree.yield_n(i)
+        r = p.rule(for_if_clauses_ir(i))
+    if r and p.nextop({']'}):
+        g = cytree.generator_n(r)
+        t = cytree.star_n(g),
+        return cytree.list_n(t)
+
+def list_listcomp_r(p:parser):
+    return p.rule(list_r) or p.rule(listcomp_r)
 
 @todo
 def dict_set_dictcomp_setcomp_r(p:parser): pass
+
+atom_map = {
+    '(': tuple_group_genexp_r,
+    '[': list_listcomp_r,
+    '{': dict_set_dictcomp_setcomp_r,
+}
+
+def atom_r(p:parser):
+    if op := p.getop({'(','{','['}):
+        return p.rule(atom_map[op.str])
+    return (p.rule(identifier_r)
+        or
+        p.rule(number_r)
+        or
+        p.rule(bool_ellipsis_r)
+        or
+        p.rule(strings_r))

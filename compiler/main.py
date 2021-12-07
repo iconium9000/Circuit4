@@ -33,8 +33,8 @@ class parser_manip(comp.control_manip):
 
 def test():
     parser_manip('test.py', 
-        "a - b / c ** d // h is not -g"# - 'test' 'ing'"
-        "% i != j == k > 17 > 3 and l or m or not not n")
+        "a - b / c ** d // h is not (-g,)"# - 'test' 'ing'"
+        "% i != j == k > 17 > 3 and l or [m] or not not n")
     # p = cyparser.parser('test.py', 'a or b and c')
 
 def main(filename:str):

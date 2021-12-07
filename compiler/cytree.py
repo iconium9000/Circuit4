@@ -6,7 +6,7 @@ from cycompiler import reverse, control, instruction, register
 
 class tree_node:
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        raise NotImplementedError(f'itc not implemented for {self.__class__.__name__}')
+        ctrl.error(f'itc not implemented for {self.__class__.__name__}')
 
 @dataclass
 class tree_range(tree_node):
@@ -103,6 +103,12 @@ class star_n(tree_node):
         return self.expr.itc(ctrl, next, reg)
 
 @dataclass
+class targets_n(tree_node):
+    targets:tuple[tree_node]
+
+    # TODO itc
+
+@dataclass
 class tuple_n(tree_node):
     exprs:tuple[tree_node]
 
@@ -116,13 +122,7 @@ class tuple_n(tree_node):
 @dataclass
 class list_n(tree_node):
     exprs:tuple[tree_node]
-
-    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        regs = tuple(register() for _ in self.exprs)
-        next = comp.list_i(next, reg, regs)
-        for reg, expr in reverse(tuple(zip(regs, self.exprs))):
-            next = expr.itc(ctrl, next, reg)
-        return next
+    # TODO itc
 
 @dataclass
 class if_expr_n(tree_node):
@@ -139,6 +139,23 @@ class if_expr_n(tree_node):
         comp.expr_inst = self.expr.itc(ctrl, next, register())
         comp.if_inst = comp.branch_i(comp.expr_inst, next, if_reg := register())
         return self.test.itc(ctrl, comp.if_inst, if_reg)
+
+@dataclass
+class async_n(tree_node):
+    expr:tree_node
+    # TODO itc
+
+@dataclass
+class for_expr_n(tree_node):
+    target:tree_node
+    iterator:tree_node
+    expr:tree_node
+
+    # TODO itc
+
+@dataclass
+class generator_n(tree_node):
+    stmt:tree_node
 
 @dataclass
 class or_block_n(tree_node):
@@ -184,6 +201,33 @@ class assignment_n(tree_node):
             next = comp.assign_i(next, t_reg := register(), reg)
             next = target.itc(ctrl, next, t_reg)
         return self.expr.itc(ctrl, next, reg)
+
+@dataclass
+class call_n(tree_node):
+    fun:tree_node
+    args:tree_node
+
+    # TODO itc
+
+@dataclass
+class attribute_ref_n(tree_node):
+    primary:tree_node
+    attrib:str
+
+    # TODO itc
+
+@dataclass
+class slice_n(tree_node):
+    arg1:'tree_node|None'
+    arg2:'tree_node|None'
+    arg3:'tree_node|None'
+
+    # TODO itc
+
+@dataclass
+class subscript_n(tree_node):
+    primary:tree_node
+    arg:tree_node
 
 @dataclass
 class compare_n(tree_node):

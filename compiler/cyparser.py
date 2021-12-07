@@ -49,6 +49,11 @@ class parser:
             return self.next()
         if err: self.error(err)
 
+    def getop(self, ops:set[str], err:'str|None'=None):
+        if isinstance(tok := self.tok, lex.opstok) and tok.str in ops:
+            return tok
+        if err: self.error(err)
+
     def nextop(self, ops:set[str], err:'str|None'=None):
         if isinstance(tok := self.tok, lex.opstok) and tok.str in ops:
             self.next()
