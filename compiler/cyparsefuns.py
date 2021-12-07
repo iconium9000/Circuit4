@@ -138,62 +138,6 @@ def p_arguments_r(p:parser):
     p.next() # assume '('
     pass
 
-
-def primary_r(p:parser):
-    def get_primary_r(p:parser):
-        if tok.str == '.':
-            p.next()
-            if n := p.nexttok(lex.idftok):
-                return cytree.attribute_ref_n(r, n.str)
-        elif tok.str == '[':
-            if s := p.rule(slices_r):
-                return cytree.subscript_n(r, s)
-        elif n := p.rule(genexp_r) or p.rule(p_arguments_r):
-            return cytree.call_n(r, n)
-    if r_next := p.rule(atom_r):
-        r = r_next
-        t_next = p.getop({'.','[','('})
-        if not t_next: return r
-        tok = t_next
-        while (r_next := p.rule(get_primary_r)):
-            tok = p.getop({'.','[','('})
-            r = r_next
-        return tok and r
-
-def t_primary_r(p:parser):
-    def get_primary_r(p:parser):
-        if tok.str == '.':
-            p.next()
-            if n := p.nexttok(lex.idftok):
-                return cytree.attribute_ref_n(r, n.str)
-        elif tok.str == '[':
-            if s := p.rule(slices_r):
-                return cytree.subscript_n(r, s)
-        elif n := p.rule(genexp_r) or p.rule(p_arguments_r):
-            return cytree.call_n(r, n)
-    if ((r_next := p.rule(atom_r))
-    and
-    (tok := p.getop({'.','[','('}))):
-        r = r_next
-        while (
-            (r_next := p.rule(get_primary_r))
-            and
-            (tok := p.getop({'.','[','('}))
-        ): r = r_next
-        return tok and r
-
-def single_subscript_attribute_target_r(p:parser):
-    if r := p.rule(t_primary_r):
-        op:lex.opstok = p.nextop({'.','['})
-        if op.str == '.':
-            n = p.nexttok(lex.idftok, "expected identifier after '.' operator")
-            r = cytree.attribute_ref_n(r, n.str)
-        else: # TODO
-            s = p.rule_err(slices_r, "syntax error with slice rule")
-            r = cytree.subscript_n(r, s)
-        if not p.nextop({'.','[','('}):
-            return r
-
 def named_assignment_r(p:parser):
     target = (p.rule(identifier_r)
         or
@@ -450,29 +394,29 @@ bitwise_op_priority = {
     '+':1, '-':1, '<<':2, '>>':2,
     '&':3, '&':4, '^':5, '|':6 }
 
-@dataclass
-class fact_bit_fn:
-    fact:cytree.tree_node
-    prev:'op_bit_fn|None' = None
-    next:'op_bit_fn|None' = None
-
-class op_bit_fn:
-    def __init__(self, op:str, prev:fact_bit_fn, f:cytree.tree_node):
-        self.op = op
-        self.prev = prev
-        prev.next = self
-        self.next = fact_bit_fn(f, self)
-
-    def join(self):
-        # a    +    b    -          ...
-        # prev self next next.next
-
-        self.prev.fact = cytree.binary_op_n(self.op, self.prev.fact, self.next.fact)
-        self.prev.next = self.next.next
-        if self.next.next:
-            self.next.next.prev = self.prev
-
 def bitwise_or_r(p:parser):
+    @dataclass
+    class fact_bit_fn:
+        fact:cytree.tree_node
+        prev:'op_bit_fn|None' = None
+        next:'op_bit_fn|None' = None
+
+    class op_bit_fn:
+        def __init__(self, op:str, prev:fact_bit_fn, f:cytree.tree_node):
+            self.op = op
+            self.prev = prev
+            prev.next = self
+            self.next = fact_bit_fn(f, self)
+
+        def join(self):
+            # a    +    b    -          ...
+            # prev self next next.next
+
+            self.prev.fact = cytree.binary_op_n(self.op, self.prev.fact, self.next.fact)
+            self.prev.next = self.next.next
+            if self.next.next:
+                self.next.next.prev = self.prev
+
     if f := p.rule(factor_r):
         f_node = root = fact_bit_fn(f, 0)
         idx = 0
@@ -530,23 +474,6 @@ def slices_r(p:parser):
     p.nextop({']'}, "expected ']' after slices")
     return r
 
-def number_r(p:parser):
-    if tok := p.nexttok(lex.numtok):
-        return cytree.number_n(tok.str)
-
-def bool_ellipsis_r(p:parser):
-    if op := p.nextop({'True','False','None','...'}):
-        if op.str == '...': return cytree.ellipsis_n()
-        return cytree.bool_n(
-            True if op.str == 'True' else
-            False if op.str == 'False' else
-            None)
-
-def strings_r(p:parser):
-    def getstrs():
-        while tok := p.nexttok(lex.strtok): yield tok.str
-    if p.gettok(lex.strtok): return cytree.string_n(tuple(getstrs()))
-
 def star_named_expression_r(p:parser):
     if p.nextop({'*'}):
         r = p.rule(bitwise_or_r)
@@ -557,6 +484,36 @@ def star_named_expression_gr(p:parser):
     op = True
     while op and (r := p.rule(star_named_expression_r)):
         yield r; op = p.nextop({','})
+
+lookahead_set = {'.','[','('}
+
+def sub_primary_pr(p:parser, a:cytree.tree_node, op:str):
+    if op == '.':
+        if n := p.nexttok(lex.idftok):
+            return cytree.attribute_ref_n(a, n.str)
+    elif op == '[':
+        if s := p.rule(slices_r):
+            return cytree.subscript_n(a, s)
+    elif n := p.rule(genexp_r) or p.rule(p_arguments_r):
+        return cytree.call_n(a, n)
+
+def primary_r(p:parser):
+    if a := p.rule(atom_r):
+        r = a
+        def sub_primary_r(p:parser):
+            if t := p.nextop(lookahead_set):
+                return sub_primary_pr(p, r, t.str)
+        while a := p.rule(sub_primary_r): r = a
+        return r
+
+def single_subscript_attribute_target_r(p:parser): 
+    if (a := p.rule(atom_r)) and (t := p.nextop(lookahead_set)):
+        r, op = a, t.str
+        def t_primary_r(p:parser):
+            if a := sub_primary_pr(p, r, op):
+                return p.getop(lookahead_set) and a
+        while a := p.rule(t_primary_r):
+            r, op = a, p.next().str
 
 def tuple_r(p:parser):
     with indent_tracking(p, False):
@@ -643,6 +600,23 @@ atom_map = {
     '[': list_listcomp_r,
     '{': dict_set_dictcomp_setcomp_r,
 }
+
+def number_r(p:parser):
+    if tok := p.nexttok(lex.numtok):
+        return cytree.number_n(tok.str)
+
+def bool_ellipsis_r(p:parser):
+    if op := p.nextop({'True','False','None','...'}):
+        if op.str == '...': return cytree.ellipsis_n()
+        return cytree.bool_n(
+            True if op.str == 'True' else
+            False if op.str == 'False' else
+            None)
+
+def strings_r(p:parser):
+    def getstrs():
+        while tok := p.nexttok(lex.strtok): yield tok.str
+    if p.gettok(lex.strtok): return cytree.string_n(tuple(getstrs()))
 
 def atom_r(p:parser):
     if op := p.getop({'(','{','['}):

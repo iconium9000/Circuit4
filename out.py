@@ -335,7 +335,7 @@ def for_stmt():
       idf(block)
       optional(idf(else_block))
     with lst():
-      idf(ASYNC)
+      op('async')
       op('for')
       idf(star_targets)
       with tilde():
@@ -368,7 +368,7 @@ def with_stmt():
       optional(idf(TYPE_COMMENT))
       idf(block)
     with lst():
-      idf(ASYNC)
+      op('async')
       op('with')
       op('(')
       with rep1():
@@ -380,7 +380,7 @@ def with_stmt():
       op(':')
       idf(block)
     with lst():
-      idf(ASYNC)
+      op('async')
       op('with')
       with rep1():
         with lst():
@@ -722,7 +722,7 @@ def function_def_raw():
       optional(idf(func_type_comment))
       idf(block)
     with lst():
-      idf(ASYNC)
+      op('async')
       op('def')
       idf(NAME)
       op('(')
@@ -1156,20 +1156,20 @@ def shift_expr():
     with lst():
       idf(shift_expr)
       op('<<')
-      idf(sum_expr)
+      idf(sum)
     with lst():
       idf(shift_expr)
       op('>>')
-      idf(sum_expr)
-    idf(sum_expr)
-def sum_expr():
+      idf(sum)
+    idf(sum)
+def sum():
   with tryor():
     with lst():
-      idf(sum_expr)
+      idf(sum)
       op('+')
       idf(term)
     with lst():
-      idf(sum_expr)
+      idf(sum)
       op('-')
       idf(term)
     idf(term)
@@ -1371,7 +1371,7 @@ def for_if_clauses():(rep1(idf(for_if_clause)))
 def for_if_clause():
   with tryor():
     with lst():
-      idf(ASYNC)
+      op('async')
       op('for')
       idf(star_targets)
       with tilde():
@@ -1506,21 +1506,12 @@ def star_target():
     idf(target_with_star_atom)
 def target_with_star_atom():
   with tryor():
-    with lst():
-      idf(t_primary)
-      op('.')
+    idf(single_subscript_attribute_target)
+    with tryor():
       idf(NAME)
-      exclusion(idf(t_lookahead))
-    with lst():
-      idf(t_primary)
-      op('[')
-      idf(slices)
-      op(']')
-      exclusion(idf(t_lookahead))
-    idf(star_atom)
+      idf(star_atom)
 def star_atom():
   with tryor():
-    idf(NAME)
     with lst():
       op('(')
       idf(target_with_star_atom)
@@ -1533,14 +1524,16 @@ def star_atom():
       op('[')
       optional(idf(star_targets_list_seq))
       op(']')
+def v_single_target():
+  with lst():
+    op('(')
+    idf(single_target)
+    op(')')
 def single_target():
   with tryor():
     idf(single_subscript_attribute_target)
     idf(NAME)
-    with lst():
-      op('(')
-      idf(single_target)
-      op(')')
+    idf(v_single_target)
 def single_subscript_attribute_target():
   with tryor():
     with lst():
@@ -1563,17 +1556,7 @@ def del_targets():
     optional(op(','))
 def del_target():
   with tryor():
-    with lst():
-      idf(t_primary)
-      op('.')
-      idf(NAME)
-      exclusion(idf(t_lookahead))
-    with lst():
-      idf(t_primary)
-      op('[')
-      idf(slices)
-      op(']')
-      exclusion(idf(t_lookahead))
+    idf(single_subscript_attribute_target)
     idf(del_t_atom)
 def del_t_atom():
   with tryor():
