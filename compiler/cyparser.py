@@ -15,6 +15,25 @@ class parser:
     def error(self, msg:str) -> NoReturn:
         self.lexer.error(msg, self.tok.lnum, self.tok.lidx)
 
+    def newline(self):
+        return # TODO
+
+    def indent(self):
+        return # TODO
+    
+    def dedent(self):
+        return # TODO
+
+    def ignore_tracking(self, start:str, rule:'Callable[[parser],tree_node|None]', end:str):
+        tok = self.tok
+        tracking = self.indent_tracking
+        self.indent_tracking = False
+        if r := self.nextop({start}) and rule(self):
+            self.indent_tracking = tracking
+            if self.nextop({end}): return r
+        else: self.indent_tracking = tracking
+        self.tok = tok
+
     def rule(self, rule:'Callable[[parser],tree_node|None]'):
         tup = self.tok.tidx, id(rule)
         if ret := self.tmap.get(tup):
@@ -65,13 +84,3 @@ def todo(r:'Callable[[parser],tree_node|None]'):
         p.error(f'"{r.__name__}" is Not Implemented')
     _r.__name__ = r.__name__
     return _r
-
-class indent_tracking:
-    def __init__(self, p:parser, indented_state:bool):
-        self.p = p
-        self.indented_state = indented_state
-    def __enter__(self):
-        self.prev_state = self.p.indent_tracking
-        self.p.indent_tracking = self.indented_state
-    def __exit__(self, *args):
-        self.p.indent_tracking = self.prev_state
