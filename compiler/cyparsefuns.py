@@ -43,10 +43,10 @@ def gen_statements(p:parser):
 
 ############################################################
 # statement_r: compound_stmt_r  | simple_stmts_r 
-def statement_r(p:parser): return (
-    p.rule(compound_stmt_r)
-    or
-    p.rule(simple_stmts_r))
+def statement_r(p:parser):
+    return (p.rule(compound_stmt_r)
+            or
+            p.rule(simple_stmts_r))
 
 
 ############################################################
@@ -106,12 +106,22 @@ def v_single_target_r(p:parser):
 
 ############################################################
 # target_with_star_atom_r: TODO
-def target_with_star_atom_r(p:parser): return (
-    p.rule(single_subscript_attribute_target_r)
-    or
-    p.rule(identifier_r)
-    or
-    p.rule(star_atom_r))
+def target_with_star_atom_r(p:parser):
+    return (p.rule(single_subscript_attribute_target_r)
+            or
+            p.rule(identifier_r)
+            or
+            p.rule(star_atom_r))
+
+
+############################################################
+# star_atom_r: TODO
+def star_atom_r(p:parser):
+    return (p.rule(p_target_with_star_atom_r)
+            or
+            p.rule(p_star_targets_tuple_seq_r)
+            or
+            p.rule(star_targets_list_seq_r))
 
 
 ############################################################
@@ -136,16 +146,6 @@ def tuple_seq_r(p:parser):
     if not r: return tree.tuple_n(tuple())
     if not p.nextop({','}): return
     return tree.tuple_n(tuple(gen_tuple_seq(p,r)))
-
-
-############################################################
-# star_atom_r: TODO
-def star_atom_r(p:parser): return (
-    p.rule(p_target_with_star_atom_r)
-    or
-    p.rule(p_star_targets_tuple_seq_r)
-    or
-    p.rule(star_targets_list_seq_r))
 
 
 ############################################################
@@ -179,12 +179,12 @@ def gen_targets(p:parser):
 
 ############################################################
 # single_target_r: TODO
-def single_target_r(p:parser): return (
-    p.rule(single_subscript_attribute_target_r)
-    or
-    p.rule(identifier_r)
-    or
-    p.rule(v_single_target_r))
+def single_target_r(p:parser):
+    return (p.rule(single_subscript_attribute_target_r)
+            or
+            p.rule(identifier_r)
+            or
+            p.rule(v_single_target_r))
 
 
 ############################################################
@@ -218,10 +218,10 @@ def named_assignment_r(p:parser):
 
 ############################################################
 # annotated_rhs: yield_expr_r | star_expressions_r
-def annotated_rhs(p:parser): return (
-    p.rule(yield_expr_r)
-    or
-    p.rule(star_expressions_r))
+def annotated_rhs(p:parser):
+    return (p.rule(yield_expr_r)
+            or
+            p.rule(star_expressions_r))
 
 
 ############################################################
@@ -252,12 +252,12 @@ augassign_ops = {'+=','-=','*=','@=','/=','%=','&=','|=','^=','<<=','>>=','**=',
 
 ############################################################
 # assignment_r: named_assignment_r | assignment_list_r | augassign_r
-def assignment_r(p:parser): return (
-    p.rule(named_assignment_r)
-    or
-    p.rule(assignment_list_r)
-    or
-    p.rule(augassign_r))
+def assignment_r(p:parser):
+    return (p.rule(named_assignment_r)
+            or
+            p.rule(assignment_list_r)
+            or
+            p.rule(augassign_r))
 
 
 ############################################################
@@ -584,10 +584,6 @@ def inversion_r(p:parser):
 
 ############################################################
 # comparison_r: bitwise_or_r (comparison_op_r ~ bitwise_or_r)*
-# comparison_op_r:
-# | 'is' ['not']
-# | 'not' ~ 'in'
-# | {comparison_ops}
 def comparison_r(p:parser):
     if expr := p.rule(bitwise_or_r):
         if comps := tuple(gen_comparison(p)):
@@ -600,6 +596,10 @@ def gen_comparison(p:parser):
         r = p.rule_err(bitwise_or_r, f"no bitwise_or after operator")
         yield op.str, r
 
+# comparison_op_r:
+# | 'is' ['not']
+# | 'not' ~ 'in'
+# | {comparison_ops}
 def comparison_op_r(p:parser):
     if op := p.nextop(comparison_ops):
         if op.str == 'is':
@@ -759,8 +759,6 @@ def sub_primary_pr(p:parser, a:tree.tree_node):
     elif n := p.rule(genexp_r) or p.rule(p_arguments_r):
         return tree.call_n(a, n)
 
-lookahead_set = {'.','[','('}
-
 
 ############################################################
 # primary_r: TODO
@@ -771,6 +769,8 @@ def primary_r(p:parser):
             return p.getop(lookahead_set) and sub_primary_pr(p, r)
         while a := p.rule(sub_primary_r): r = a
         return r
+
+lookahead_set = {'.','[','('}
 
 
 ############################################################
@@ -817,16 +817,16 @@ def for_if_clauses_ir(i:tree.tree_node):
     # | expression_r
     # | kwarg_r
     # | starred_expression_r
-def arg_r(p:parser): return (
-    p.rule(starred_expression_r)
-    or
-    p.rule(assignment_expression_r)
-    or
-    p.rule(expression_r)
-    or
-    p.rule(kwarg_r)
-    or
-    p.rule(starred_expression_r))
+def arg_r(p:parser):
+    return (p.rule(starred_expression_r)
+            or
+            p.rule(assignment_expression_r)
+            or
+            p.rule(expression_r)
+            or
+            p.rule(kwarg_r)
+            or
+            p.rule(starred_expression_r))
 
 
 ############################################################
@@ -918,7 +918,7 @@ def listcomp_r(p:parser):
 
 
 ############################################################
-@todo
+@todo # dict_set_dictcomp_setcomp_r: TODO
 def dict_set_dictcomp_setcomp_r(p:parser): pass
 
 
