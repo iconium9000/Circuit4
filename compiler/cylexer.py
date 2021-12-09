@@ -133,21 +133,7 @@ class lexer:
             return self.next(opstok, pat, e)
 
     def strpat(self) -> 'lextok | None':
-        pat:str = str()
-        if m := strpat.match(self.file, self.fidx_end):
-            s, e = m.span()
-            c = self.file[s:e]
-            f,l = '\\' + c, len(c)
-            while 0 <= (i := self.file.find(f, e)):
-                pat += self.file[e:i] + c
-                e = i+1+l
-            if 0 <= (i := self.file.find("'''", e)):
-                pat += self.file[e:i]
-                if l == 1 and 0 <= pat.find('\n'):
-                    self.error("unexpected newline in string", self.lnum, self.lidx_start())
-                return self.next(strtok, pat, s, e+l)
-            self.error("end string seq never found", self.lnum, self.lidx_start())
-
+        return None
     def idfpat(self) -> 'lextok | None':
         if m := idfpat.match(self.file, self.fidx_end):
             s,e = m.span()

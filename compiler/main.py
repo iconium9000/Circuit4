@@ -10,10 +10,8 @@ class parser_manip(comp.control_manip):
 
     def __init__(self, filename:str, file:str):
         self.p = cyparser.parser(filename, file)
-        self.p.nexttok(lex.tabtok)
-
-        self.n = self.p.rule_err(funs.disjunction_r, "failed to read file")
-        c = comp.compiler(self)
+        self.n = self.p.rule_err(funs.file_r, "failed to read file")
+        comp.compiler(self)
     
     def itc(self, c: comp.control, i: comp.instruction, r: comp.register) -> comp.instruction:
         return self.n.itc(c, i, r)
@@ -33,19 +31,16 @@ class parser_manip(comp.control_manip):
 
 def test():
     parser_manip('test.py', 
-        "a - b / c ** d // h.a is not (-g,)"# - 'test' 'ing'"
+        "a - b / c ** d // h is not (-g,)"# - 'test' 'ing'"
         "% i != j == k > 17 > 3 and l or not not n")
-    # p = cyparser.parser('test.py', 'a or b and c')
 
 def main(filename:str):
     with open(filename, 'r') as f:
         file = f.read()
-    p = cyparser.parser(filename, file)
-    r = funs.file_r(p)
+    parser_manip(filename, file)
 
 if __name__ == "__main__":
     filename = sys.argv[1]
 
-    test()
-    # main(filename)
-
+    # test()
+    main(filename)

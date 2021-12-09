@@ -1,31 +1,22 @@
 # cyparsefuns.py
 from dataclasses import dataclass
-from typing import Callable
 from cyparser import parser, todo
 import cylexer as lex
-from cythonlexer import tabtok
 import cytree as tree
-from out import genexp
 
 def file_r(p:parser):
-    if tok := p.nexttok(lex.tabtok):
-        p.indent = tok.slen
-        r = p.rule(statements_r)
-        p.nexttok(lex.endtok, "failed to reach end of file")
+    if p.nextnewline() and (r := p.rule(statements_r)):
+        p.gettok(lex.endtok, "failed to reach end of file")
         return r
 
-@todo
 def block_r(p:parser):
-    indent = p.indent
-    def statements_block_r(p:parser):
-        if ((t := p.nexttok(lex.tabtok))
-        and
-        t.slen > indent):
-            p.indent = indent
-    r = p.rule(statements_block_r)
-    if r: return r
-    else: p.indent = indent
-    
+    if p.nextnewline():
+        i = p.nextindent()
+        if i is None: p.error('no indent')
+        r = p.rule_err(statements_r, 'expected statements after indent')
+        if p.nextdedent(i) and p.nextnewline(): return r
+        else: p.error('no dedent after block')
+    else: return p.rule(simple_stmts_r)
 
 def statements_r(p:parser):
     def getstmts():
@@ -50,7 +41,7 @@ def simple_stmts_r(p:parser):
         while r := p.rule(simple_stmt_r):
             yield r
             if not p.nextop({';'}): break
-    if args := tuple(getstmts()):
+    if (args := tuple(getstmts())) and p.nextnewline():
         if len(args) == 1: return args[0]
         return tree.statements_n(args)
 
@@ -200,7 +191,7 @@ def star_expressions_r(p:parser):
             while r and p.nextop({','}):
                 yield r
                 r = p.rule(star_expression_r) or p.rule(expression_r)
-        if args := tuple(getexprs()):
+        if args := tuple(getexprs(r)):
             return tree.tuple_n(args)
         return r
 
@@ -468,14 +459,14 @@ def slice_r(p:parser):
 
 def slices_r(p:parser):
     def single_slice_r(p:parser):
-        if (r := p.rule(slice_r)) and not p.getop({','}):
-            return r
+        if ((r := p.rule(slice_r) or p.rule(named_expression_r))
+        and not p.getop({','})): return r
     def gen_tuple_slices():
-        while r := p.rule(slice_r):
+        while r := p.rule(slice_r) or p.rule(named_expression_r):
             yield r
             if not p.nextop(','): break
     if r := p.rule(single_slice_r): return r
-    elif args := tuple(gen_tuple_slices):
+    elif args := tuple(gen_tuple_slices()):
         return tree.tuple_n(args)
 
 def star_named_expression_r(p:parser):
@@ -497,7 +488,7 @@ def sub_primary_pr(p:parser, a:tree.tree_node):
         if n := p.nexttok(lex.idftok):
             return tree.attribute_ref_n(a, n.str)
     elif p.tok.str == '[':
-        if s := p.rule(slices_r):
+        if s := p.ignore_tracking('[',slices_r,']'):
             return tree.subscript_n(a, s)
     elif n := p.rule(genexp_r) or p.rule(p_arguments_r):
         return tree.call_n(a, n)
@@ -511,12 +502,7 @@ def primary_r(p:parser):
         return r
 
 def single_subscript_attribute_target_r(p:parser): 
-    if (a := p.rule(atom_r)) and p.getop(lookahead_set):
-        r = a
-        def t_primary_r(p:parser):
-            a = sub_primary_pr(p, r)
-            return a and p.getop(lookahead_set) and a
-        while a := p.rule(t_primary_r): r = a
+    return primary_r(p)
 
 def for_if_clauses_ir(i:tree.tree_node):
     def if_clause_r(p:parser):

@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "compiler/main.py",
             "console": "integratedTerminal",
-            "args": ["main.cy"],
+            "args": ["compiler/main.cy"],
         },
         {
             "name": "parsepnf.py",

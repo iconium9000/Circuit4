@@ -8,21 +8,35 @@ class parser:
     def __init__(self, filename:str, file:str):
         self.lexer = lex.lexer(filename, file)
         self.tmap:'dict[tuple[int,int],tree_range|Literal[True]]' = {}
-        self.indent = 0
+        self.indent_level = 0
         self.indent_tracking = True
         self.tok = self.lexer.toks[0]
 
     def error(self, msg:str) -> NoReturn:
         self.lexer.error(msg, self.tok.lnum, self.tok.lidx)
 
-    def newline(self):
-        return # TODO
+    def nextnewline(self):
+        if tab := self.gettok(lex.tabtok):
+            if tab.slen == self.indent_level:
+                self.next()
+            return True
+        return False
 
-    def indent(self):
-        return # TODO
-    
-    def dedent(self):
-        return # TODO
+    def nextindent(self):
+        if ((tab := self.gettok(lex.tabtok))
+        and
+        (tab.slen > self.indent_level)):
+            self.next()
+            i = self.indent_level
+            self.indent_level = tab.slen
+            return i
+        return None
+
+    def nextdedent(self, indent_level:int):
+        self.indent_level = indent_level
+        return ((tab := self.gettok(lex.tabtok))
+        and
+        tab.slen <= self.indent_level)
 
     def ignore_tracking(self, start:str, rule:'Callable[[parser],tree_node|None]', end:str):
         tok = self.tok
