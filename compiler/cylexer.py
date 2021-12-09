@@ -94,7 +94,7 @@ class lexer:
     
     def lidx(self, fidx:int):
         return fidx - self.ls_fidxs[self.lnum]
-    
+
     def lidx_start(self):
         return self.fidx_start - self.ls_fidxs[self.lnum]
 

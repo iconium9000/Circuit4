@@ -86,21 +86,37 @@ class yield_n(tree_node):
 
 @dataclass
 class hint_n(tree_node):
-    var:tree_node
+    idf:tree_node
     hint:tree_node
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         next = comp.hint_i(next, reg, hint := register())
         next = self.hint.itc(ctrl, next, hint)
-        return self.var.itc(ctrl, next, reg)
+        return self.idf.itc(ctrl, next, reg)
 
 @dataclass
-class star_n(tree_node):
+class kwarg_n(tree_node):
+    name:str
+    expr:tree_node
+    # TODO itc
+
+@dataclass
+class insert_iter_n(tree_node):
     expr:tree_node
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         next = comp.star_i(next, reg, reg := register())
         return self.expr.itc(ctrl, next, reg)
+
+@dataclass
+class insert_kv_iter_n(tree_node):
+    expr:tree_node
+    # TODO itc
+
+@dataclass
+class arguments_n(tree_node):
+    expr:tuple[tree_node]
+    # TODO itc
 
 @dataclass
 class targets_n(tree_node):

@@ -546,9 +546,14 @@ yield_expr:
     | 'yield' [star_expressions] 
 
 arguments:
-    | args [','] &')' 
+    | args [','] &')'
+
+arg:
+    | starred_expression
+    | ( assignment_expression | expression !':=') !'='
+
 args:
-    | ','.(starred_expression | ( assignment_expression | expression !':=') !'=')+ [',' kwargs ] 
+    | ','.arg+ [',' kwargs ] 
     | kwargs 
 
 kwargs:
