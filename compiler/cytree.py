@@ -250,7 +250,7 @@ class tuple_n(tree_node):
 @dataclass
 class list_target_n(tree_node):
     exprs:tuple[tree_node]
-    
+
     def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
         regs = tuple(register() for _ in self.exprs)
         next = comp.list_target_i(next, reg, regs)
@@ -281,9 +281,9 @@ class if_expr_n(tree_node):
     expr:tree_node
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        comp.expr_inst = self.expr.itc(ctrl, next, register())
-        comp.if_inst = comp.branch_i(comp.expr_inst, next, if_reg := register())
-        return self.test.itc(ctrl, comp.if_inst, if_reg)
+        expr_inst = self.expr.itc(ctrl, next, register())
+        if_inst = comp.branch_i(expr_inst, next, reg)
+        return self.test.itc(ctrl, if_inst, reg)
 
 @dataclass
 class async_n(tree_node):
@@ -336,7 +336,7 @@ class assignment_n(tree_node):
     targets:tuple[tree_node, ...]
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        for target in self.targets:
+        for target in self.targets[::-1]:
             next = comp.assign_i(next, t_reg := register(), reg)
             next = target.itc(ctrl, next, t_reg)
         return self.expr.itc(ctrl, next, reg)

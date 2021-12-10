@@ -436,7 +436,6 @@ def if_stmt_r(p:parser):
     return tree.or_block_n(tuple(gen_if_blocks(p)))
 
 def gen_if_blocks(p:parser):
-    # assumes previous tok was 'if' op
     if_test = p.rule_err(named_expression_r, "missing 'if case'")
     p.nextop({':'}, "missing ':'")
     if_block = p.rule_err(block_r, "missing if block")
