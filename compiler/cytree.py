@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 import cylexer
 import cycompiler as comp
-from cycompiler import reverse, control, instruction, register
+from cycompiler import control, instruction, register
 
 class tree_node:
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
@@ -40,7 +40,7 @@ class string_n(tree_node):
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         regs = tuple(register() for _ in self.strings)
         next = comp.strings_i(next, reg, regs)
-        for r,s in reverse(tuple(zip(regs, self.strings))):
+        for r,s in tuple(zip(regs, self.strings))[::-1]:
             next = comp.string_i(next, r, s)
         return next
 
@@ -68,7 +68,7 @@ class statements_n(tree_node):
     exprs:tuple[tree_node]
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        for expr in reverse(self.exprs):
+        for expr in self.exprs[::-1]:
             next = expr.itc(ctrl, next, reg)
         return next
 
@@ -98,31 +98,143 @@ class hint_n(tree_node):
 class kwarg_n(tree_node):
     name:str
     expr:tree_node
-    # TODO itc
+    
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        next = comp.kwarg_i(next, reg, self.name, expr_reg := register())
+        return self.expr.itc(ctrl, next, expr_reg)
 
 @dataclass
-class insert_iter_n(tree_node):
+class iter_n(tree_node):
     expr:tree_node
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        next = comp.star_i(next, reg, reg := register())
+        next = comp.iter_i(next, reg, reg := register())
         return self.expr.itc(ctrl, next, reg)
 
 @dataclass
-class insert_kv_iter_n(tree_node):
+class kw_iter_n(tree_node):
     expr:tree_node
-    # TODO itc
+    
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        next = comp.kw_iter_i(next, reg, reg := register())
+        return self.expr.itc(ctrl, next, reg)
 
 @dataclass
 class arguments_n(tree_node):
-    expr:tuple[tree_node]
-    # TODO itc
+    exprs:tuple[tree_node]
+
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        regs = tuple(register() for _ in self.exprs)
+        next = comp.args_i(next, reg, regs)
+        for reg, expr in tuple(zip(regs, self.exprs))[::-1]:
+            next = expr.itc(ctrl, next, reg)
+        return next
 
 @dataclass
-class targets_n(tree_node):
+class call_n(tree_node):
+    func:tree_node
+    args:tree_node
+
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        func_reg, args_reg = register(), register()
+        next = comp.call_i(next, reg, func_reg, args_reg)
+        next = self.args.itc(ctrl, next, args_reg)
+        return self.func.itc(ctrl, next, func_reg)
+
+@dataclass
+class call_target_n(tree_node):
+    func:tree_node
+    args:tree_node
+
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        ctrl.error("call target not supported")
+
+@dataclass
+class attribute_ref_n(tree_node):
+    primary:tree_node
+    attrib:str
+
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        prim_reg = register()
+        next = comp.attrib_i(next, reg, prim_reg, self.attrib)
+        return self.primary.itc(ctrl, next, prim_reg)
+
+@dataclass
+class attribute_target_n(tree_node):
+    primary:tree_node
+    attrib:str
+
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        prim_reg = register()
+        next = comp.attrib_tar_i(next, reg, prim_reg, self.attrib)
+        return self.primary(ctrl, next, prim_reg)
+
+@dataclass
+class slice_n(tree_node):
+    arg1:'tree_node|None'
+    arg2:'tree_node|None'
+    arg3:'tree_node|None'
+
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        reg1 = self.arg1 and register()
+        reg2 = self.arg2 and register()
+        reg3 = self.arg3 and register()
+        next = comp.slice_i(next, reg, reg1, reg2, reg3)
+        if reg3: next = self.arg3.itc(ctrl, next, reg3)
+        if reg2: next = self.arg2.itc(ctrl, next, reg2)
+        if reg1: next = self.arg1.itc(ctrl, next, reg1)
+        return next
+
+@dataclass
+class subscript_n(tree_node):
+    primary:tree_node
+    arg:tree_node
+
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        arg_target = register()
+        prim_target = register()
+        next = comp.subscript_i(next, reg, prim_target, arg_target)
+        next = self.arg.itc(ctrl, next, arg_target)
+        return self.primary.itc(ctrl, next, prim_target)
+
+@dataclass
+class subscript_target_n(tree_node):
+    primary:tree_node
+    arg:tree_node
+
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        arg_target = register()
+        prim_target = register()
+        next = comp.subscript_target_i(next, reg, prim_target, arg_target)
+        next = self.arg.itc(ctrl, next, arg_target)
+        return self.primary.itc(ctrl, next, prim_target)
+
+@dataclass
+class identifier_target_n(tree_node):
+    name:str
+
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        return comp.identifier_target_i(next, reg, self.name)
+
+
+@dataclass
+class iter_target_n(tree_node):
+    expr:tree_node
+
+    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
+        next = comp.iter_target_i(next, reg, reg := register())
+        return self.expr.itc(ctrl, next, reg)
+
+@dataclass
+class tuple_target_n(tree_node):
     targets:tuple[tree_node]
 
-    # TODO itc
+    def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
+        regs = tuple(register() for _ in self.exprs)
+        next = comp.tuple_target_i(next, reg, regs)
+        for reg, expr in tuple(zip(regs, self.exprs))[::-1]:
+            next = expr.itc(ctrl, next, reg)
+        return next
 
 @dataclass
 class tuple_n(tree_node):
@@ -131,14 +243,31 @@ class tuple_n(tree_node):
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         regs = tuple(register() for _ in self.exprs)
         next = comp.tuple_i(next, reg, regs)
-        for reg, expr in reverse(tuple(zip(regs, self.exprs))):
+        for reg, expr in tuple(zip(regs, self.exprs))[::-1]:
+            next = expr.itc(ctrl, next, reg)
+        return next
+
+@dataclass
+class list_target_n(tree_node):
+    exprs:tuple[tree_node]
+    
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        regs = tuple(register() for _ in self.exprs)
+        next = comp.list_target_i(next, reg, regs)
+        for reg, expr in tuple(zip(regs, self.exprs))[::-1]:
             next = expr.itc(ctrl, next, reg)
         return next
 
 @dataclass
 class list_n(tree_node):
     exprs:tuple[tree_node]
-    # TODO itc
+    
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        regs = tuple(register() for _ in self.exprs)
+        next = comp.list_i(next, reg, regs)
+        for reg, expr in tuple(zip(regs, self.exprs))[::-1]:
+            next = expr.itc(ctrl, next, reg)
+        return next
 
 @dataclass
 class if_expr_n(tree_node):
@@ -187,7 +316,7 @@ class or_block_n(tree_node):
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         return_to = next
-        for expr in reverse(self.exprs):
+        for expr in self.exprs[::-1]:
             next = comp.branch_i(return_to, next, reg)
             next = expr.itc(ctrl, next, reg)
         return next
@@ -204,7 +333,7 @@ class and_block_n(tree_node):
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         return_to = next
-        for expr in reverse(self.exprs):
+        for expr in self.exprs[::-1]:
             next = comp.branch_i(next, return_to, reg)
             next = expr.itc(ctrl, next, reg)
         return next
@@ -215,37 +344,10 @@ class assignment_n(tree_node):
     targets:tuple[tree_node, ...]
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        for target in reverse(self.targets):
+        for target in self.targets[::-1]:
             next = comp.assign_i(next, t_reg := register(), reg)
             next = target.itc(ctrl, next, t_reg)
         return self.expr.itc(ctrl, next, reg)
-
-@dataclass
-class call_n(tree_node):
-    fun:tree_node
-    args:tree_node
-
-    # TODO itc
-
-@dataclass
-class attribute_ref_n(tree_node):
-    primary:tree_node
-    attrib:str
-
-    # TODO itc
-
-@dataclass
-class slice_n(tree_node):
-    arg1:'tree_node|None'
-    arg2:'tree_node|None'
-    arg3:'tree_node|None'
-
-    # TODO itc
-
-@dataclass
-class subscript_n(tree_node):
-    primary:tree_node
-    arg:tree_node
 
 @dataclass
 class compare_n(tree_node):
@@ -255,7 +357,7 @@ class compare_n(tree_node):
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         return_to = next
         arga, argb = reg, register()
-        for op, expr in reverse(self.compares):
+        for op, expr in self.compares[::-1]:
             arga = register()
             next = comp.branch_i(next, return_to, reg)
             next = comp.compare_i(next, op, reg, arga, argb)

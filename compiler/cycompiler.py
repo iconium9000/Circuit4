@@ -23,8 +23,6 @@ class listmap(Generic[K,V]):
         self.map[k] = len(self.list)
         self.list.append(v)
 
-def reverse(t:tuple[V, ...]): return (t[i] for i in range(len(t)-1, -1, -1))
-
 class control_manip:
     def itc(self, c:'control', i:'instruction', r:'register') -> 'instruction':
         raise NotImplementedError(c, i, r)
@@ -63,14 +61,14 @@ class register: pass
 class base_instruction:
     next:'base_instruction|None'
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
-        return 'base',
+    def elements(self) -> 'tuple[base_instruction|register|str|None, ...]':
+        raise NotImplementedError(self.__class__.__name__)
 
     def newnode(self, c: 'compiler') -> i_node:
-        raise NotImplementedError
+        raise NotImplementedError(self.__class__.__name__)
 
     def checknext(self, c: 'compiler', n: i_node):
-        raise NotImplementedError
+        raise NotImplementedError(self.__class__.__name__)
 
 class compiler:
 
@@ -105,11 +103,13 @@ class compiler:
             if n.prev is not None: continue
             while n: yield n.inst; n = n.next
 
-    def getstr(self, s:'str|base_instruction|register'):
+    def getstr(self, s:'base_instruction|register|str|None'):
         if isinstance(s, base_instruction):
             s = self.label(s)
         elif isinstance(s, register):
             s = self.reg(s)
+        elif s is None:
+            s = 'None'
         return s.ljust(7)
 
     def label(self, i:base_instruction):
@@ -140,9 +140,9 @@ class compiler:
 class instruction(base_instruction):
     next:base_instruction
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
-        return 'inst'
-    
+    def elements(self):
+        raise NotImplementedError(self.__class__.__name__)
+
     def newnode(self, c: 'compiler') -> i_node:
         c.stack.append(self)
         return c.setnode(self, i_node(self))
@@ -163,7 +163,7 @@ class hang_i(base_instruction):
     '''
     next:None=None
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'hang',
 
 @dataclass
@@ -171,7 +171,7 @@ class exit_i(base_instruction):
     next:None
     code:register
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'exit', self.code
 
     def newnode(self, c: 'compiler') -> i_node:
@@ -185,7 +185,7 @@ class jump_i(base_instruction):
     next:None
     jump:instruction
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'jump', self.jump
     
     def newnode(self, c: 'compiler') -> i_node:
@@ -193,7 +193,7 @@ class jump_i(base_instruction):
 
 @dataclass
 class pass_i(instruction):
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'pass',
     
     def newnode(self, c: 'compiler') -> i_node:
@@ -203,7 +203,7 @@ class pass_i(instruction):
 class comment_i(instruction):#(pass_i):
     msg:str
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return '# ' + self.msg,
 
 @dataclass
@@ -216,7 +216,7 @@ class branch_i(instruction):
     branch:instruction
     test:register
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'if', self.branch, self.test
 
     def newnode(self, c: 'compiler') -> i_node:
@@ -251,37 +251,130 @@ class yield_i(instruction):
     yield_to:instruction
     arg:register
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'yield', self.yield_to, self.arg
 
 @dataclass
-class star_i(instruction):
+class iter_i(instruction):
     target:register
     arg:register
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
-        return 'star', self.target, self.arg
+    def elements(self):
+        return 'iter', self.target, self.arg
+
+@dataclass
+class kw_iter_i(instruction):
+    target:register
+    arg:register
+
+    def elements(self):
+        return 'kw-iter', self.target, self.arg
 
 @dataclass
 class hint_i(instruction):
     target:register
     arg:register
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'hint', self.target, self.arg
+
+@dataclass
+class kwarg_i(instruction):
+    target:register
+    name:str
+    expr:register
+
+    def elements(self):
+        return 'kwarg', self.target, self.name, self.expr
+
+@dataclass
+class tuple_target_i(instruction):
+    target:register
+    args:tuple[register]
+
+    def elements(self):
+        return 't-tuple', self.target, *self.args
 
 @dataclass
 class tuple_i(instruction):
     target:register
     args:tuple[register]
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'tuple', self.target, *self.args
 
 @dataclass
+class list_target_i(tuple_i):
+    def elements(self):
+        return 't-list', self.target, *self.args
+
+@dataclass
 class list_i(tuple_i):
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'list', self.target, *self.args
+
+@dataclass
+class args_i(instruction):
+    target:register
+    args:tuple[register]
+
+    def elements(self):
+        return 'args', self.target, *self.args
+
+@dataclass
+class call_i(instruction):
+    target:register
+    func:register
+    args:register
+
+    def elements(self):
+        return 'call', self.target, self.func, self.args
+
+@dataclass
+class attrib_i(instruction):
+    target:register
+    expr:register
+    attrib:str
+
+    def elements(self):
+        return 'attrib', self.target, self.expr, self.attrib
+
+@dataclass
+class attrib_tar_i(instruction):
+    target:register
+    expr:register
+    attrib:str
+
+    def elements(self):
+        return 't-attrib', self.target, self.expr, self.attrib
+
+@dataclass
+class subscript_i(instruction):
+    target:register
+    expr:register
+    arg:register
+
+    def elements(self):
+        return 'subscript', self.target, self.expr, self.arg
+
+@dataclass
+class subscript_target_i(instruction):
+    target:register
+    expr:register
+    arg:register
+
+    def elements(self):
+        return 't-subscript', self.target, self.expr, self.arg
+
+@dataclass
+class slice_i(instruction):
+    target:register
+    arg1:'register|None'
+    arg2:'register|None'
+    arg3:'register|None'
+
+    def elements(self):
+        return 'attrib', self.target, self.arg1, self.arg2, self.arg3
 
 @dataclass
 class except_i(instruction):
@@ -290,7 +383,7 @@ class except_i(instruction):
     exc_value:register
     exc_traceback:register
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'except', self.raise_to, self.exc_value, self.exc_traceback
 
 @dataclass
@@ -298,7 +391,7 @@ class assign_i(instruction):
     target:register
     arg:register
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'assign', self.target, self.arg
 
 @dataclass
@@ -306,7 +399,7 @@ class await_i(instruction):
     target:register
     arg:register
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'await', self.target, self.arg
 
 @dataclass
@@ -316,7 +409,7 @@ class binary_op_i(instruction):
     arga:register
     argb:register
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return self.op, self.target, self.arga, self.argb
 
 @dataclass
@@ -329,7 +422,7 @@ class unary_op_i(instruction):
     target:register
     arg:register
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return self.op, self.target, self.arg
 
 @dataclass
@@ -337,15 +430,31 @@ class number_i(instruction):
     target:register
     num:str
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'num', self.target, self.num
+
+@dataclass
+class identifier_target_i(instruction):
+    target:register
+    name:str
+
+    def elements(self):
+        return 't-idf', self.target, self.name
+
+@dataclass
+class iter_target_i(instruction):
+    target:register
+    arg:register
+
+    def elements(self):
+        return 't-iter', self.target, self.arg
 
 @dataclass
 class identifier_i(instruction):
     target:register
     idf:str
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'idf', self.target, self.idf
 
 @dataclass
@@ -353,7 +462,7 @@ class string_i(instruction):
     target:register
     string:str
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'str', self.target, self.string
 
 @dataclass
@@ -361,7 +470,7 @@ class strings_i(instruction):
     target:register
     strings:tuple[register]
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return 'strs', self.target, *self.strings
 
 @dataclass
@@ -369,12 +478,12 @@ class bool_i(instruction):
     target:register
     val:'bool|None'
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return self.val, self.target
 
 @dataclass
 class ellipsis_i(instruction):
     target:register
 
-    def elements(self) -> 'tuple[str|base_instruction|register, ...]':
+    def elements(self):
         return self.target,

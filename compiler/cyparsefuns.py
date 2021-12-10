@@ -42,7 +42,7 @@ def gen_statements(p:parser):
 
 
 ############################################################
-# statement_r: compound_stmt_r  | simple_stmts_r 
+# statement_r: compound_stmt_r  | simple_stmts_r
 def statement_r(p:parser):
     return (p.rule(compound_stmt_r)
             or
@@ -50,7 +50,7 @@ def statement_r(p:parser):
 
 
 ############################################################
-# simple_stmts_r: ';'.simple_stmt_r+ [';'] NEWLINE 
+# simple_stmts_r: ';'.simple_stmt_r+ [';'] NEWLINE
 def simple_stmts_r(p:parser):
     if (args := tuple(gen_simple_stmts(p))) and p.nextnewline():
         if len(args) == 1: return args[0]
@@ -76,20 +76,26 @@ def star_expression_r(p:parser):
 
 
 ############################################################
-# star_target_r: TODO
+# star_target_r:
+    # | '*' (!'*' target_with_star_atom)
+    # | target_with_star_atom_r
 def star_target_r(p:parser):
     if not p.nextop({'*'}):
         return p.rule(target_with_star_atom_r)
     elif p.getop({'*'}): return
     elif r := p.rule(target_with_star_atom_r):
-        return tree.insert_iter_n(r)
+        return tree.iter_target_n(r)
 
 
 ############################################################
-# star_targets_r: TODO
+# star_targets_r:
+    # | star_target_r !',' 
+    # | star_target_r (',' star_target_r )* [','] 
 def star_targets_r(p:parser):
+    if (r := p.rule(star_target_r)) and not p.nextop({','}):
+        return r
     if args := tuple(gen_star_targets(p)):
-        return tree.targets_n(args)
+        return tree.tuple_target_n(args)
 
 def gen_star_targets(p:parser):
     if r := p.rule(star_target_r):
@@ -106,26 +112,22 @@ def v_single_target_r(p:parser):
 
 ############################################################
 # target_with_star_atom_r: TODO
+    # | single_subscript_attribute_target_r
+    # | identifier_target_r
+    # | '(' target_with_star_atom_r ')'
+    # | '(' star_targets_tuple_seq_r ')'
+    # | '[' star_targets_list_seq_r ']'
 def target_with_star_atom_r(p:parser):
     return (p.rule(single_subscript_attribute_target_r)
             or
-            p.rule(identifier_r)
+            p.rule(identifier_target_r)
             or
-            p.rule(star_atom_r))
-
-
-############################################################
-# star_atom_r: TODO
-def star_atom_r(p:parser):
-    return (p.rule(p_target_with_star_atom_r)
+            p.rule(p_target_with_star_atom_r)
             or
             p.rule(p_star_targets_tuple_seq_r)
             or
             p.rule(star_targets_list_seq_r))
 
-
-############################################################
-# p_target_with_star_atom_r: TODO
 def p_target_with_star_atom_r(p:parser):
     return p.ignore_tracking('(', target_with_star_atom_r, ')')
 
@@ -135,17 +137,17 @@ def p_target_with_star_atom_r(p:parser):
 def p_star_targets_tuple_seq_r(p:parser):
     return p.ignore_tracking('(', tuple_seq_r, ')')
 
+def tuple_seq_r(p:parser):
+    r = p.rule(star_target_r)
+    if not r: return tree.tuple_target_n(tuple())
+    if not p.nextop({','}): return
+    return tree.tuple_target_n(tuple(gen_tuple_seq(p,r)))
+
 def gen_tuple_seq(p:parser, r:tree.tree_node):
     yield r
     while r and (r := p.rule(star_target_r)):
         yield r
         r = p.nextop({','})
-
-def tuple_seq_r(p:parser):
-    r = p.rule(star_target_r)
-    if not r: return tree.tuple_n(tuple())
-    if not p.nextop({','}): return
-    return tree.tuple_n(tuple(gen_tuple_seq(p,r)))
 
 
 ############################################################
@@ -169,7 +171,7 @@ def star_targets_list_seq_r(p:parser):
 
 def targets_r(p:parser):
     if args := tuple(gen_targets(p)):
-        return tree.list_n(args)
+        return tree.list_target_n(args)
 
 def gen_targets(p:parser):
     while r := p.rule(star_target_r):
@@ -178,22 +180,31 @@ def gen_targets(p:parser):
 
 
 ############################################################
-# single_target_r: TODO
+# identifier_target_r: NAME
+def identifier_target_r(p:parser):
+    if t := p.nexttok(lex.idftok):
+        return tree.identifier_target_n(t.str)
+
+############################################################
+# single_target_r:
+    # | single_subscript_attribute_target_r
+    # | identifier_target_r
+    # | v_single_target_r
 def single_target_r(p:parser):
     return (p.rule(single_subscript_attribute_target_r)
             or
-            p.rule(identifier_r)
+            p.rule(identifier_target_r)
             or
             p.rule(v_single_target_r))
 
 
 ############################################################
 # name_target_r:
-    # | identifier_r
+    # | identifier_target_r
     # | v_single_target_r
     # | single_subscript_attribute_target_r
 def name_target_r(p:parser): return(
-    p.rule(identifier_r)
+    p.rule(identifier_target_r)
     or
     p.rule(v_single_target_r)
     or
@@ -313,7 +324,7 @@ def yield_expr_r(p:parser):
 def yield_stmt_r(p:parser):
     if p.nextop({'from'}):
         r = p.rule_err(expression_r, f"no expression after 'yield from' operator")
-        r = tree.insert_iter_n(r)
+        r = tree.iter_n(r)
     else: r = p.rule(star_expressions_r) or tree.bool_n(None)
     return tree.yield_n(r)
 
@@ -511,9 +522,9 @@ compound_stmt_map = {
 ############################################################
 # assignment_expression_r: identifier_r ':=' ~ expression_r
 def assignment_expression_r(p:parser):
-    if (name := p.rule(identifier_r)) and p.nextop({':='}):
+    if (target := p.rule(identifier_target_r)) and p.nextop({':='}):
         expr = p.rule_err(expression_r, "no expression after ':=' operator")
-        return tree.assignment_n(expr, (name,))
+        return tree.assignment_n(expr, (target,))
 
 
 ############################################################
@@ -734,7 +745,7 @@ def gen_tuple_slices(p:parser):
 def star_named_expression_r(p:parser):
     if p.nextop({'*'}):
         r = p.rule(bitwise_or_r)
-        return r and tree.insert_iter_n(r)
+        return r and tree.iter_n(r)
     return p.rule(named_expression_r)
 
 
@@ -747,21 +758,46 @@ def star_named_expression_gr(p:parser):
 
 
 ############################################################
-# sub_primary_pr: TODO
+# sub_primary_pr:
+    # | primary& '.' ~ NAME
+    # | primary& '[' ~ slices ']'
+    # | primary& &'(' genexp
+    # | primary& &'(' p_arguments_r
 def sub_primary_pr(p:parser, a:tree.tree_node):
     if p.tok.str == '.':
         p.next()
         if n := p.nexttok(lex.idftok):
             return tree.attribute_ref_n(a, n.str)
+        p.error("no identifier after '.' operator")
     elif p.tok.str == '[':
         if s := p.ignore_tracking('[',slices_r,']'):
             return tree.subscript_n(a, s)
+        p.error("no slice after '[' operator")
     elif n := p.rule(genexp_r) or p.rule(p_arguments_r):
         return tree.call_n(a, n)
 
 
 ############################################################
-# primary_r: TODO
+# single_subscript_attribute_target_r:
+    # | t_primary_r '.' ~ NAME !{lookahead_set}
+    # | t_primary_r '[' slices ']' !{lookahead_set}
+def single_subscript_attribute_target_r(p:parser):
+    if (a := p.rule(t_primary_r)):
+        if p.tok.str == '.':
+            p.next()
+            if n := p.nexttok(lex.idftok):
+                return tree.attribute_target_n(a, n.str)
+            p.error("no identifier after '.' operator")
+        elif p.tok.str == '[':
+            if s := p.ignore_tracking('[',slices_r,']'):
+                return tree.subscript_target_n(a, s)
+            p.error("no slice after '[' operator")
+        elif n := p.rule(genexp_r) or p.rule(p_arguments_r):
+            return tree.call_target_n(a, n)
+
+
+############################################################
+# primary_r: atom_r (&{lookahead_set} sub_primary_pr)*
 def primary_r(p:parser):
     if a := p.rule(atom_r):
         r = a
@@ -773,11 +809,15 @@ def primary_r(p:parser):
 lookahead_set = {'.','[','('}
 
 
-############################################################
-# single_subscript_attribute_target_r: TODO
-def single_subscript_attribute_target_r(p:parser):
-    return primary_r(p)
-
+# t_primary_r: atom_r &{lookahead_set} (sub_primary_pr &{lookahead_set})*
+def t_primary_r(p:parser):
+    if (a := p.rule(atom_r)) and p.getop(lookahead_set):
+        r = a
+        def sub_t_primary_r(p:parser):
+            if (s := sub_primary_pr(p, r)) and p.getop(lookahead_set):
+                return s
+        while a := p.rule(sub_t_primary_r): r = a
+        return r
 
 ############################################################
 # for_if_clauses_ir: TODO
@@ -833,14 +873,14 @@ def arg_r(p:parser):
 # starred_expression_r: '*' expression_r
 def starred_expression_r(p:parser):
     if r := p.nextop({'*'}) and expression_r(p):
-        return tree.insert_iter_n(r)
+        return tree.iter_n(r)
 
 
 ############################################################
 # double_starred_expression_r: '**' expression_r
 def double_starred_expression_r(p:parser):
     if r := p.nextop({'**'}) and expression_r(p):
-        return tree.insert_iter_n(r)
+        return tree.iter_n(r)
 
 
 ############################################################
@@ -913,7 +953,7 @@ def listcomp_r(p:parser):
     and
     (r := p.rule(for_if_clauses_ir(i)))):
         g = tree.generator_n(r)
-        t = tree.insert_iter_n(g)
+        t = tree.iter_n(g)
         return tree.list_n(t)
 
 
