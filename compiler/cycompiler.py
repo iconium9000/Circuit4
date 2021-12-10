@@ -96,7 +96,9 @@ class compiler:
                 i.checknext(self, n)
 
         for i in self.getinsts():
-            print(self.getstr(i), *(self.getstr(s) for s in i.elements()))
+            e = tuple(self.getstr(s).ljust(12) for s in i.elements())
+            i = self.getstr(i).ljust(5)
+            print(i, *e, sep='')
 
     def getinsts(self):
         for n in self.labels.list:
@@ -105,13 +107,12 @@ class compiler:
 
     def getstr(self, s:'base_instruction|register|str|None'):
         if isinstance(s, base_instruction):
-            s = self.label(s)
+            return self.label(s)
         elif isinstance(s, register):
-            s = self.reg(s)
+            return self.reg(s)
         elif s is None:
-            s = 'None'
-        return s.ljust(7)
-
+            return 'None'
+        return s
     def label(self, i:base_instruction):
         n = self.i_nodes[id(i)]
         # self.labels[id(n)] = n
@@ -200,11 +201,11 @@ class pass_i(instruction):
         return c.setnode(self, c.getnode(self.next))
 
 @dataclass
-class comment_i(instruction):#(pass_i):
+class comment_i(pass_i):
     msg:str
 
     def elements(self):
-        return '# ' + self.msg,
+        return '#', *self.msg.split('\n'),
 
 @dataclass
 class branch_i(instruction):

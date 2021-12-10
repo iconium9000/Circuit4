@@ -91,8 +91,8 @@ class hint_n(tree_node):
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         next = comp.hint_i(next, reg, hint := register())
-        next = self.hint.itc(ctrl, next, hint)
-        return self.idf.itc(ctrl, next, reg)
+        next = self.idf.itc(ctrl, next, reg)
+        return self.hint.itc(ctrl, next, hint)
 
 @dataclass
 class kwarg_n(tree_node):
@@ -291,14 +291,6 @@ class async_n(tree_node):
     # TODO itc
 
 @dataclass
-class for_expr_n(tree_node):
-    target:tree_node
-    iterator:tree_node
-    expr:tree_node
-
-    # TODO itc
-
-@dataclass
 class generator_n(tree_node):
     stmt:tree_node
 
@@ -344,7 +336,7 @@ class assignment_n(tree_node):
     targets:tuple[tree_node, ...]
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        for target in self.targets[::-1]:
+        for target in self.targets:
             next = comp.assign_i(next, t_reg := register(), reg)
             next = target.itc(ctrl, next, t_reg)
         return self.expr.itc(ctrl, next, reg)
