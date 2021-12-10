@@ -1,13 +1,13 @@
 # cyparser.py
 from typing import Callable, Literal, NoReturn
 import cylexer as lex
-from cytree import tree_node, tree_range
+from cytree import tree_node, tree_range_n
 
 class parser:
 
     def __init__(self, filename:str, file:str):
         self.lexer = lex.lexer(filename, file)
-        self.tmap:'dict[tuple[int,int],tree_range|Literal[True]]' = {}
+        self.tmap:'dict[tuple[int,int],tree_range_n|Literal[True]]' = {}
         self.indent_level = 0
         self.indent_tracking = True
         self.tok = self.lexer.toks[0]
@@ -57,12 +57,12 @@ class parser:
         self.tmap[tup] = True
         tok = self.tok
         if ret := rule(self):
-            if isinstance(ret, tree_range): ret = ret.node
-            self.tmap[tup] = ret = tree_range(ret, tok, self.tok)
+            if isinstance(ret, tree_range_n): ret = ret.node
+            self.tmap[tup] = ret = tree_range_n(ret, tok, self.tok)
             return ret
         self.tok = tok
 
-    def rule_err(self, rule:'Callable[[parser],tree_node|None]', err:str) -> 'tree_range | NoReturn':
+    def rule_err(self, rule:'Callable[[parser],tree_node|None]', err:str) -> 'tree_range_n | NoReturn':
         return self.rule(rule) or self.error(err)
 
     def next(self):

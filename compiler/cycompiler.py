@@ -24,8 +24,6 @@ class listmap(Generic[K,V]):
         self.list.append(v)
 
 class control_manip:
-    def itc(self, c:'control', i:'instruction', r:'register') -> 'instruction':
-        raise NotImplementedError(c, i, r)
     def error(self, msg:str, lnum:int, lidx:int) -> NoReturn:
         raise NotImplementedError(msg, lnum, lidx)
     def getlines(self, slnum:int, slidx:int, elnum:int, elidx) -> Iterable[str]:
@@ -36,12 +34,19 @@ class control:
     manip:control_manip
     lnum:int
     lidx:int
+
     raise_to:'instruction'
+    exc_info:'tuple[register, register, register]'
+
     return_to:'instruction|None'=None
-    yields:bool=False
-    yield_to:'instruction|None'=None
+    return_reg:'register|None'=None
+
     break_to:'instruction|None'=None
     continue_to:'instruction|None'=None
+
+    yield_to:'instruction|None'=None
+    yield_reg:'register|None'=None
+    yields:bool=False
 
     def error(self, msg:str):
         self.manip.error(msg, self.lnum, self.lidx)
@@ -55,7 +60,8 @@ class i_node:
     undefined:'bool'=False
 
 @dataclass
-class register: pass
+class register:
+    msg:str
 
 @dataclass
 class base_instruction:
@@ -72,21 +78,12 @@ class base_instruction:
 
 class compiler:
 
-    def __init__(self, manip:control_manip):
+    def __init__(self, inst:base_instruction):
         self.i_nodes:dict[int,i_node] = {}
         self.stack:list[base_instruction] = []
 
         self.labels = listmap[int,i_node]()
         self.registers = listmap[int,register]()
-
-        exc_value = register()
-        exc_type = register()
-        exc_traceback = register()
-
-        exit_to = exit_i(None, exc_value)
-        raise_to = except_i(exit_to, exit_to, exc_type, exc_value, exc_traceback)
-        ctrl = control(manip, 0, 0, raise_to)
-        inst = manip.itc(ctrl, pass_i(exit_to), exc_value)
 
         root = self.getnode(inst)
         self.addlabel(root)
@@ -188,7 +185,7 @@ class jump_i(base_instruction):
 
     def elements(self):
         return 'jump', self.jump
-    
+
     def newnode(self, c: 'compiler') -> i_node:
         return c.setnode(self, c.getnode(self.jump))
 
@@ -196,7 +193,7 @@ class jump_i(base_instruction):
 class pass_i(instruction):
     def elements(self):
         return 'pass',
-    
+
     def newnode(self, c: 'compiler') -> i_node:
         return c.setnode(self, c.getnode(self.next))
 
@@ -228,14 +225,14 @@ class branch_i(instruction):
         if isinstance(i := branch_n.inst, branch_i) and i.test == self.test:
             self.branch = i.branch
             branch_n = c.getnode(i)
-        
+
         if isinstance(i := next_n.inst, branch_i) and i.test == self.test:
             self.next = i.next
             next_n = c.getnode(i)
 
         if branch_n == next_n:
             return c.setnode(self, branch_n)
-        
+
         if branch_n.prev is None and next_n.prev is not None:
             br = branch_i(branch_n.inst, next_n.inst, reg := register())
             i = unary_op_i(br, 'not', reg, self.test)
@@ -250,34 +247,59 @@ class branch_i(instruction):
 @dataclass
 class yield_i(instruction):
     yield_to:instruction
-    arg:register
+    yield_arg:register
 
     def elements(self):
-        return 'yield', self.yield_to, self.arg
+        return 'yield', self.yield_to, self.yield_arg
+
+@dataclass
+class next_i(instruction):
+    break_to:instruction
+    target:register
+    iterator:register
+
+    def elements(self):
+        return 'next', self.break_to, self.target, self.iterator
 
 @dataclass
 class iter_i(instruction):
     target:register
-    arg:register
+    iterable:register
 
     def elements(self):
-        return 'iter', self.target, self.arg
+        return 'iter', self.target, self.iterable
+
+@dataclass
+class star_i(instruction):
+    target:register
+    iterator:register
+
+    def elements(self):
+        return 'star', self.target, self.iterator
 
 @dataclass
 class kw_iter_i(instruction):
     target:register
-    arg:register
+    iterable:register
 
     def elements(self):
-        return 'kw-iter', self.target, self.arg
+        return 'kw-iter', self.target, self.iterable
+
+@dataclass
+class kw_star_i(instruction):
+    target:register
+    iterator:register
+
+    def elements(self):
+        return 'kw-star', self.target, self.iterator
 
 @dataclass
 class hint_i(instruction):
     target:register
-    arg:register
+    type_info:register
 
     def elements(self):
-        return 'hint', self.target, self.arg
+        return 'hint', self.target, self.type_info
 
 @dataclass
 class kwarg_i(instruction):
@@ -305,12 +327,18 @@ class tuple_i(instruction):
         return 'tuple', self.target, *self.args
 
 @dataclass
-class list_target_i(tuple_i):
+class list_target_i(instruction):
+    target:register
+    args:tuple[register]
+
     def elements(self):
         return 't-list', self.target, *self.args
 
 @dataclass
-class list_i(tuple_i):
+class list_i(instruction):
+    target:register
+    args:tuple[register]
+
     def elements(self):
         return 'list', self.target, *self.args
 
@@ -352,20 +380,20 @@ class attrib_tar_i(instruction):
 @dataclass
 class subscript_i(instruction):
     target:register
-    expr:register
-    arg:register
+    primary:register
+    attrib:register
 
     def elements(self):
-        return 'subscript', self.target, self.expr, self.arg
+        return 'subscript', self.target, self.primary, self.attrib
 
 @dataclass
 class subscript_target_i(instruction):
     target:register
-    expr:register
-    arg:register
+    primary:register
+    attrib:register
 
     def elements(self):
-        return 't-subscript', self.target, self.expr, self.arg
+        return 't-subscript', self.target, self.primary, self.attrib
 
 @dataclass
 class slice_i(instruction):
@@ -379,21 +407,22 @@ class slice_i(instruction):
 
 @dataclass
 class except_i(instruction):
-    raise_to:base_instruction
-    exc_type:register
-    exc_value:register
-    exc_traceback:register
+    val_target:'register|None'
+    type_test:register|None
+
+    # exc_type, exc_value, exc_traceback
+    exc_info:tuple[register, register, register]
 
     def elements(self):
-        return 'except', self.raise_to, self.exc_value, self.exc_traceback
+        return 'except', self.val_target, self.type_test, *self.exc_info
 
 @dataclass
 class assign_i(instruction):
     target:register
-    arg:register
+    expr:register
 
     def elements(self):
-        return 'assign', self.target, self.arg
+        return 'assign', self.target, self.expr
 
 @dataclass
 class await_i(instruction):

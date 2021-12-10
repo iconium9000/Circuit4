@@ -76,7 +76,7 @@ class lexer:
         self.tidx = 0 # changes with iterator
         self.fidx_start = -1 # changes with iterator
 
-        def gettoks():    
+        def gettoks():
             while self.fidx_start < self.fidx_end:
                 self.fidx_start = self.fidx_end
                 if info := self.strpat(): yield info
@@ -91,7 +91,7 @@ class lexer:
                     return
             self.error("lexer no move", self.lnum, self.lidx_start())
         self.toks = tuple(gettoks())
-    
+
     def lidx(self, fidx:int):
         return fidx - self.ls_fidxs[self.lnum]
 

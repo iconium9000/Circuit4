@@ -89,8 +89,8 @@ def star_target_r(p:parser):
 
 ############################################################
 # star_targets_r:
-    # | star_target_r !',' 
-    # | star_target_r (',' star_target_r )* [','] 
+    # | star_target_r !','
+    # | star_target_r (',' star_target_r )* [',']
 def star_targets_r(p:parser):
     if (r := p.rule(star_target_r)) and not p.nextop({','}):
         return r
@@ -324,7 +324,7 @@ def yield_expr_r(p:parser):
 def yield_stmt_r(p:parser):
     if p.nextop({'from'}):
         r = p.rule_err(expression_r, f"no expression after 'yield from' operator")
-        r = tree.iter_n(r)
+        r = tree.star_n(r)
     else: r = p.rule(star_expressions_r) or tree.bool_n(None)
     return tree.yield_n(r)
 
@@ -428,30 +428,25 @@ def_stmt_ops = {
 
 
 ##############################################################
-# if_stmt_r: if_block ('elif' elif_block)* ['else' else_block]
-# if_block: 'if'& ~ named_expression ~ ':' ~ block
-# elif_block: 'elif'& ~ named_expressions ~ ':' ~ block
-# else_block: 'else'& ~ ':' ~ block
+# if_stmt_r: if_elif_block_r ['elif' if_stmt_r | 'else' else_block_r]
+# if_elif_block_r: ('if' | 'elif')& ~ named_expression ~ ':' ~ block
+# else_block_r: 'else'& ~ ':' ~ block
 def if_stmt_r(p:parser):
-    return tree.or_block_n(tuple(gen_if_blocks(p)))
-
-def gen_if_blocks(p:parser):
-    if_test = p.rule_err(named_expression_r, "missing 'if case'")
+    if_test = p.rule_err(named_expression_r, "missing 'if/elif test'")
     p.nextop({':'}, "missing ':'")
-    if_block = p.rule_err(block_r, "missing if block")
-    yield tree.if_expr_n(if_test, if_block)
+    if_true = p.rule_err(block_r, "missing if block")
 
-    while p.nextop({'elif'}):
-        elif_test = p.rule_err(named_expression_r, "missing 'elif case'")
-        p.nextop({':'}, "missing ':")
-        elif_block = p.rule_err(block_r, "missing elif block")
-        yield tree.if_expr_n(elif_test, elif_block)
+    if t := p.nextop({'elif', 'else'}):
+        if t.str == 'elif':
+            if_false = p.rule(if_stmt_r)
+        else:
+            if_false = p.rule(else_block_r)
+    else: if_false = tree.pass_n()
+    return tree.if_n(if_test, if_true, if_false)
 
-    if p.nextop('else'):
-        p.nextop({':'}, "missing ':")
-        else_block = p.rule_err(block_r, "missing else block")
-        yield else_block
-
+def else_block_r(p:parser):
+    p.nextop({':'}, "missing ':")
+    return p.rule_err(block_r, "missing else block")
 
 ############################################################
 @todo # with_stmt_r: 'with'& TODO
@@ -545,13 +540,13 @@ def lambda_def_r(p:parser):
 def expression_r(p:parser):
     if p.nextop({'lambda'}):
         return p.rule_err(lambda_def_r, "missing lambda body")
-    elif if_body := p.rule(disjunction_r):
+    elif if_true := p.rule(disjunction_r):
         if p.nextop({'if'}):
             if_test = p.rule_err(disjunction_r, "missing if body")
             p.nextop({'else'}, sys="missing 'else' token")
-            else_body = p.rule_err(expression_r, "missing else body")
-            return tree.or_block_n(tree.if_expr_n(if_test, if_body), else_body)
-        return if_body
+            if_false = p.rule_err(expression_r, "missing else body")
+            return tree.if_n(if_test, if_true, if_false)
+        return if_true
 
 
 ############################################################
@@ -744,7 +739,7 @@ def gen_tuple_slices(p:parser):
 def star_named_expression_r(p:parser):
     if p.nextop({'*'}):
         r = p.rule(bitwise_or_r)
-        return r and tree.iter_n(r)
+        return r and tree.star_n(r)
     return p.rule(named_expression_r)
 
 
@@ -825,7 +820,7 @@ def for_if_clauses_ir(i:tree.tree_node):
     def if_clause_r(p:parser):
         if p.nextop({'if'}) and (test := p.rule(disjunction_r)):
             r = p.rule(for_clause_r) or p.rule(if_clause_r) or i
-            return tree.if_expr_n(test, r)
+            return tree.if_n(test, r, tree.continue_n())
 
     def for_clause_r(p:parser):
         fail = False
@@ -841,7 +836,7 @@ def for_if_clauses_ir(i:tree.tree_node):
         and
         (i := p.rule(disjunction_r))):
             e = p.rule(for_clause_r) or p.rule(if_clause_r) or i
-            r = tree.for_expr_n(t, i, e)
+            r = tree.for_n(t, i, e)
             if op.str == 'async':
                 return tree.async_n(r)
             return r
@@ -872,14 +867,14 @@ def arg_r(p:parser):
 # starred_expression_r: '*' expression_r
 def starred_expression_r(p:parser):
     if r := p.nextop({'*'}) and expression_r(p):
-        return tree.iter_n(r)
+        return tree.star_n(r)
 
 
 ############################################################
 # double_starred_expression_r: '**' expression_r
 def double_starred_expression_r(p:parser):
     if r := p.nextop({'**'}) and expression_r(p):
-        return tree.iter_n(r)
+        return tree.kw_star_n(r)
 
 
 ############################################################
@@ -952,7 +947,7 @@ def listcomp_r(p:parser):
     and
     (r := p.rule(for_if_clauses_ir(i)))):
         g = tree.generator_n(r)
-        t = tree.iter_n(g)
+        t = tree.star_n(g)
         return tree.list_n(t)
 
 
