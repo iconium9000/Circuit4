@@ -48,7 +48,6 @@ def statement_r(p:parser):
         return (p.rule(compound_stmt_r)
                 or
                 p.rule(simple_stmts_r))
-    print('end')
 
 
 ############################################################

@@ -6,41 +6,23 @@ import cyparsefuns as funs
 import cycompiler as comp
 from cycompiler import register
 
-class parser_manip(comp.control_manip):
+class parser_manip(comp.context_tracing):
 
     def __init__(self, filename:str, file:str):
         self.p = cyparser.parser(filename, file)
         self.n = self.p.rule_err(funs.file_r, "failed to read file")
+        self.sidx, self.eidx = 0, 0
 
-        exit_reg = comp.register('program-exit')
-        stmts_reg = comp.register('program-stmts')
+        print('success')
 
-        exit_to = comp.exit_i(None, exit_reg)
-        exit_success = comp.number_i(exit_to, exit_reg, '0')
-        exit_fail = comp.number_i(exit_to, exit_reg, '1')
+    def update(self, startidx: int, stopidx: int) -> tuple[int, int]:
+        r = self.sidx, self.eidx
+        self.sidx, self.eidx = startidx, stopidx
+        return r
 
-        exc_type = register('program-exc-type')
-        exc_value = register('program-exc-value')
-        exc_traceback = register('program-exc-traceback')
-        exc_info = exc_type, exc_value, exc_traceback
-        raise_to = comp.except_i(exit_fail, None, None, exc_info)
-        raise_to = comp.raise_i(raise_to, *exc_info)
-        ctrl = comp.control(self, 0, 0, raise_to)
-        inst = self.n.itc(ctrl, exit_success, stmts_reg)
-        comp.compiler(inst)
-
-    def error(self, msg: str, lnum: int, lidx: int) -> NoReturn:
-        self.p.lexer.error(msg, lnum, lidx)
-
-    def getlines(self, slnum: int, slidx: int, elnum: int, elidx) -> Iterable[str]:
-        lines = self.p.lexer.lines
-        if slnum == elnum:
-            yield lines[slnum][slidx:elidx]
-            return
-        yield lines[slnum][slidx:]
-        for lnum in range(slnum+1, elnum-1, 1):
-            yield lines[lnum]
-        yield lines[elnum][:elidx]
+    def error(self, msg: str) -> NoReturn:
+        tok = self.p.lexer.toks[self.sidx]
+        self.p.lexer.error(msg, tok.lnum, tok.lidx)
 
 def test():
     parser_manip('test.py',
