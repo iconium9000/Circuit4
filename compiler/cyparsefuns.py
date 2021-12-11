@@ -44,9 +44,11 @@ def gen_statements(p:parser):
 ############################################################
 # statement_r: compound_stmt_r  | simple_stmts_r
 def statement_r(p:parser):
-    return (p.rule(compound_stmt_r)
-            or
-            p.rule(simple_stmts_r))
+    if not p.gettok(lex.endtok):
+        return (p.rule(compound_stmt_r)
+                or
+                p.rule(simple_stmts_r))
+    print('end')
 
 
 ############################################################
@@ -767,8 +769,11 @@ def sub_primary_pr(p:parser, a:tree.tree_node):
         if s := p.ignore_tracking('[',slices_r,']'):
             return tree.subscript_n(a, s)
         p.error("no slice after '[' operator")
-    elif n := p.rule(genexp_r) or p.rule(p_arguments_r):
-        return tree.call_n(a, n)
+    elif n := p.rule(genexp_r):
+        args = tree.arguments_n((n,))
+        return tree.call_n(a, args)
+    elif args := p.rule(p_arguments_r):
+        return tree.call_n(a, args)
 
 
 ############################################################
@@ -786,8 +791,6 @@ def single_subscript_attribute_target_r(p:parser):
             if s := p.ignore_tracking('[',slices_r,']'):
                 return tree.subscript_target_n(a, s)
             p.error("no slice after '[' operator")
-        elif n := p.rule(genexp_r) or p.rule(p_arguments_r):
-            return tree.call_target_n(a, n)
 
 
 ############################################################
@@ -828,15 +831,15 @@ def for_if_clauses_ir(i:tree.tree_node):
         and
         (op.str == 'for' or p.nextop({'for'}))
         and
-        (t := p.rule(star_targets_r))
+        (target := p.rule(star_targets_r))
         and
         p.nextop({'in'})
         and
         (fail := True)
         and
-        (i := p.rule(disjunction_r))):
-            e = p.rule(for_clause_r) or p.rule(if_clause_r) or i
-            r = tree.for_n(t, i, e)
+        (iterable := p.rule(disjunction_r))):
+            block = p.rule(for_clause_r) or p.rule(if_clause_r) or i
+            r = tree.for_n(target, iterable, block)
             if op.str == 'async':
                 return tree.async_n(r)
             return r
@@ -905,8 +908,8 @@ def genexp_r(p:parser):
         if not i:
             i = p.rule(expression_r)
             if not i or p.getop({':='}): return
-        r = p.rule(for_if_clauses_ir(tree.yield_n(i)))
-        return tree.generator_n(r)
+        if r := p.rule(for_if_clauses_ir(tree.yield_n(i))):
+            return tree.generator_n(r)
     return p.ignore_tracking('(', sub_genexp_r, ')')
 
 

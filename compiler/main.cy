@@ -7,3 +7,5 @@ else:
     help
     if asdf.testing():
         i:list[int] = [1,2,3,4,5]
+    t = tuple(i for i in range(10))
+

@@ -49,16 +49,10 @@ class parser:
         self.tok = tok
 
     def rule(self, rule:'Callable[[parser],tree_node|None]'):
-        tup = self.tok.tidx, id(rule)
-        if ret := self.tmap.get(tup):
-            if ret is True: return
-            self.tok = ret.next_tok
-            return ret
-        self.tmap[tup] = True
         tok = self.tok
         if ret := rule(self):
             if isinstance(ret, tree_range_n): ret = ret.node
-            self.tmap[tup] = ret = tree_range_n(ret, tok, self.tok)
+            ret = tree_range_n(ret, tok, self.tok)
             return ret
         self.tok = tok
 

@@ -1,10 +1,10 @@
 # main.py
 import sys
 from typing import Iterable, NoReturn
-import cylexer as lex
 import cyparser
 import cyparsefuns as funs
 import cycompiler as comp
+from cycompiler import register
 
 class parser_manip(comp.control_manip):
 
@@ -12,20 +12,21 @@ class parser_manip(comp.control_manip):
         self.p = cyparser.parser(filename, file)
         self.n = self.p.rule_err(funs.file_r, "failed to read file")
 
-        exit_reg = comp.register('exit')
-        exc_type = comp.register('exc-type')
-        exc_value = comp.register('exc-value')
-        exc_traceback = comp.register('exc-traceback')
-        exc_info = exc_type, exc_value, exc_traceback
-        stmts_reg = comp.register('file-stmts')
+        exit_reg = comp.register('program-exit')
+        stmts_reg = comp.register('program-stmts')
 
         exit_to = comp.exit_i(None, exit_reg)
-        exit_fail = comp.number_i(exit_to, exit_reg, '1')
         exit_success = comp.number_i(exit_to, exit_reg, '0')
-        raise_to = comp.except_i(exit_fail, None, None, exc_info)
-        ctrl = comp.control(self, 0, 0, raise_to, exc_info)
-        inst = self.n.itc(ctrl, exit_success, stmts_reg)
+        exit_fail = comp.number_i(exit_to, exit_reg, '1')
 
+        exc_type = register('program-exc-type')
+        exc_value = register('program-exc-value')
+        exc_traceback = register('program-exc-traceback')
+        exc_info = exc_type, exc_value, exc_traceback
+        raise_to = comp.except_i(exit_fail, None, None, exc_info)
+        raise_to = comp.raise_i(raise_to, *exc_info)
+        ctrl = comp.control(self, 0, 0, raise_to)
+        inst = self.n.itc(ctrl, exit_success, stmts_reg)
         comp.compiler(inst)
 
     def error(self, msg: str, lnum: int, lidx: int) -> NoReturn:

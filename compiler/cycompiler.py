@@ -30,28 +30,6 @@ class control_manip:
         raise NotImplementedError(slnum, slidx, elnum, elidx)
 
 @dataclass
-class control:
-    manip:control_manip
-    lnum:int
-    lidx:int
-
-    raise_to:'instruction'
-    exc_info:'tuple[register, register, register]'
-
-    return_to:'instruction|None'=None
-    return_reg:'register|None'=None
-
-    break_to:'instruction|None'=None
-    continue_to:'instruction|None'=None
-
-    yield_to:'instruction|None'=None
-    yield_reg:'register|None'=None
-    yields:bool=False
-
-    def error(self, msg:str):
-        self.manip.error(msg, self.lnum, self.lidx)
-
-@dataclass
 class i_node:
     inst:'base_instruction'
     checked:bool=False
@@ -75,6 +53,23 @@ class base_instruction:
 
     def checknext(self, c: 'compiler', n: i_node):
         raise NotImplementedError(self.__class__.__name__)
+
+@dataclass
+class control:
+    manip:control_manip
+    lnum:int
+    lidx:int
+
+    raise_to:'raise_i'
+    return_to:'return_i|None'=None
+    yield_to:'yield_i|None'=None
+
+    yields:bool=False
+    break_to:'base_instruction|None'=None
+    continue_to:'base_instruction|None'=None
+
+    def error(self, msg:str):
+        self.manip.error(msg, self.lnum, self.lidx)
 
 class compiler:
 
@@ -110,6 +105,7 @@ class compiler:
         elif s is None:
             return 'None'
         return s
+
     def label(self, i:base_instruction):
         n = self.i_nodes[id(i)]
         # self.labels[id(n)] = n
@@ -142,7 +138,7 @@ class instruction(base_instruction):
         raise NotImplementedError(self.__class__.__name__)
 
     def newnode(self, c: 'compiler') -> i_node:
-        c.stack.append(self)
+        c.stack_frame.append(self)
         return c.setnode(self, i_node(self))
 
     def checknext(self, c: 'compiler', n: i_node):
@@ -176,12 +172,31 @@ class exit_i(base_instruction):
         return c.setnode(self, i_node(self))
 
 @dataclass
+class store_inst_i(instruction):
+    target:register
+    inst:base_instruction
+
+    def elements(self):
+        return 'store-i', self.target, self.inst
+
+@dataclass
+class jump_reg_i(base_instruction):
+    next:None
+    jump:register
+
+    def elements(self) -> 'tuple[base_instruction|register|str|None, ...]':
+        return 'jump', self.jump
+    
+    def newnode(self, c: 'compiler') -> i_node:
+        return c.setnode(self, i_node(self))
+
+@dataclass
 class jump_i(base_instruction):
     '''
     go to jump
     '''
     next:None
-    jump:instruction
+    jump:base_instruction
 
     def elements(self):
         return 'jump', self.jump
@@ -199,10 +214,10 @@ class pass_i(instruction):
 
 @dataclass
 class comment_i(pass_i):
-    msg:str
+    lines:tuple[str, ...]
 
     def elements(self):
-        return '#', *self.msg.split('\n'),
+        return '#', *self.lines
 
 @dataclass
 class branch_i(instruction):
@@ -211,7 +226,7 @@ class branch_i(instruction):
     go to branch if reg is false
     '''
 
-    branch:instruction
+    branch:base_instruction
     test:register
 
     def elements(self):
@@ -241,20 +256,73 @@ class branch_i(instruction):
         c.addlabel(branch_n)
 
         self_n.undefined = False
-        c.stack.append(self)
+        c.stack_frame.append(self)
         return self_n
 
 @dataclass
+class generator_i(instruction):
+    target:register
+    stmt:base_instruction
+
+    def elements(self):
+        return 'generator', self.stmt
+
+@dataclass
+class type_i(instruction):
+    target:register
+    arg:register
+
+    def elements(self):
+        return 'type', self.target, self.arg
+
+@dataclass
+class exc_value_i(instruction):
+    target:register
+    exception:register
+
+    def elements(self):
+        return 'exc-value', self.target, self.exception
+
+@dataclass
+class raise_i(instruction):
+    exc_type:register
+    exc_value:register
+    exc_traceback:register
+
+    def elements(self):
+        return 'raise', self.exc_type, self.exc_value, self.exc_traceback
+
+@dataclass
+class except_i(instruction):
+    val_target:'register|None'
+    type_test:'register|None'
+
+    # exc_type, exc_value, exc_traceback
+    exc_info:tuple[register, register, register]
+
+    def elements(self):
+        return 'except', self.val_target, self.type_test, *self.exc_info
+
+@dataclass
+class return_i(instruction):
+    ret_value:register
+    ret_traceback:register
+
+    def elements(self):
+        return 'return', self.ret_value
+
+@dataclass
 class yield_i(instruction):
-    yield_to:instruction
-    yield_arg:register
+    addr:register
+    value:register
+    return_addr:register
 
     def elements(self):
         return 'yield', self.yield_to, self.yield_arg
 
 @dataclass
 class next_i(instruction):
-    break_to:instruction
+    break_to:base_instruction
     target:register
     iterator:register
 
@@ -313,7 +381,7 @@ class kwarg_i(instruction):
 @dataclass
 class tuple_target_i(instruction):
     target:register
-    args:tuple[register]
+    args:tuple[register, ...]
 
     def elements(self):
         return 't-tuple', self.target, *self.args
@@ -321,7 +389,7 @@ class tuple_target_i(instruction):
 @dataclass
 class tuple_i(instruction):
     target:register
-    args:tuple[register]
+    args:tuple[register, ...]
 
     def elements(self):
         return 'tuple', self.target, *self.args
@@ -329,7 +397,7 @@ class tuple_i(instruction):
 @dataclass
 class list_target_i(instruction):
     target:register
-    args:tuple[register]
+    args:tuple[register, ...]
 
     def elements(self):
         return 't-list', self.target, *self.args
@@ -337,7 +405,7 @@ class list_target_i(instruction):
 @dataclass
 class list_i(instruction):
     target:register
-    args:tuple[register]
+    args:tuple[register, ...]
 
     def elements(self):
         return 'list', self.target, *self.args
@@ -345,7 +413,7 @@ class list_i(instruction):
 @dataclass
 class args_i(instruction):
     target:register
-    args:tuple[register]
+    args:tuple[register, ...]
 
     def elements(self):
         return 'args', self.target, *self.args
@@ -404,17 +472,6 @@ class slice_i(instruction):
 
     def elements(self):
         return 'attrib', self.target, self.arg1, self.arg2, self.arg3
-
-@dataclass
-class except_i(instruction):
-    val_target:'register|None'
-    type_test:register|None
-
-    # exc_type, exc_value, exc_traceback
-    exc_info:tuple[register, register, register]
-
-    def elements(self):
-        return 'except', self.val_target, self.type_test, *self.exc_info
 
 @dataclass
 class assign_i(instruction):
@@ -498,7 +555,7 @@ class string_i(instruction):
 @dataclass
 class strings_i(instruction):
     target:register
-    strings:tuple[register]
+    strings:tuple[register, ...]
 
     def elements(self):
         return 'strs', self.target, *self.strings

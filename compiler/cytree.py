@@ -15,16 +15,7 @@ class tree_range_n(tree_node):
     next_tok:cylexer.lextok
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
-        lnum, lidx = ctrl.lnum, ctrl.lidx
-        ctrl.lnum = self.start_tok.lnum
-        ctrl.lidx = self.start_tok.lidx
-        next = self.node.itc(ctrl, next, reg)
-        ctrl.lnum, ctrl.lidx = lnum, lidx
-        s = self.start_tok
-        e = self.next_tok
-        lines = '\n'.join(ctrl.manip.getlines(s.lnum, s.lidx, e.lnum, e.lidx))
-        next = comp.comment_i(next, lines)
-        return next
+        return next # TODO track
 
 @dataclass
 class number_n(tree_node):
@@ -35,7 +26,7 @@ class number_n(tree_node):
 
 @dataclass
 class string_n(tree_node):
-    strings:tuple[str]
+    strings:tuple[str, ...]
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         regs = tuple(register('str') for _ in self.strings)
@@ -65,12 +56,28 @@ class ellipsis_n(tree_node):
 
 @dataclass
 class statements_n(tree_node):
-    exprs:tuple[tree_node]
+    exprs:tuple[tree_node, ...]
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         for expr in self.exprs[::-1]:
             next = expr.itc(ctrl, next, register('stmt'))
         return next
+
+@dataclass
+class raise_n(tree_node):
+    expr:tree_node
+
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+        raise_to = ctrl.raise_to
+        exc_type = raise_to.exc_type
+        exc_value = raise_to.exc_value
+        exc_traceback = raise_to.exc_traceback
+        exc_target = register('exc-target')
+
+        raise_to = comp.exc_value_i(raise_to, exc_value, exc_target)
+        raise_to = comp.type_i(raise_to, exc_type, exc_target)
+        raise_to = self.expr.itc(ctrl, raise_to, exc_target)
+        return comp.store_inst_i(raise_to, exc_traceback, raise_to)
 
 @dataclass
 class yield_n(tree_node):
@@ -81,8 +88,8 @@ class yield_n(tree_node):
             ctrl.error("'yield' outside function")
         ctrl.yields = True
         next = comp.bool_i(next, reg, None)
-        next = comp.yield_i(next, ctrl.yield_to, ctrl.yield_reg)
-        return self.expr.itc(ctrl, next, ctrl.yield_reg)
+        next = comp.store_inst_i(ctrl.yield_to.return_addr, )
+        return self.expr.itc(ctrl, next, ctrl.yield_to.reg)
 
 @dataclass
 class hint_n(tree_node):
@@ -129,7 +136,7 @@ class kw_star_n(tree_node):
 
 @dataclass
 class arguments_n(tree_node):
-    exprs:tuple[tree_node]
+    exprs:tuple[tree_node, ...]
 
     def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
         regs = tuple(register('args-expr') for _ in self.exprs)
@@ -235,7 +242,7 @@ class iter_target_n(tree_node):
 
 @dataclass
 class tuple_target_n(tree_node):
-    targets:tuple[tree_node]
+    targets:tuple[tree_node, ...]
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         regs = tuple(register() for _ in self.exprs)
@@ -246,7 +253,7 @@ class tuple_target_n(tree_node):
 
 @dataclass
 class tuple_n(tree_node):
-    exprs:tuple[tree_node]
+    exprs:tuple[tree_node, ...]
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         regs = tuple(register('tuple-element') for _ in self.exprs)
@@ -257,7 +264,7 @@ class tuple_n(tree_node):
 
 @dataclass
 class list_target_n(tree_node):
-    exprs:tuple[tree_node]
+    exprs:tuple[tree_node, ...]
 
     def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
         regs = tuple(register() for _ in self.exprs)
@@ -268,7 +275,7 @@ class list_target_n(tree_node):
 
 @dataclass
 class list_n(tree_node):
-    exprs:tuple[tree_node]
+    exprs:tuple[tree_node, ...]
 
     def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
         regs = tuple(register('list-element') for _ in self.exprs)
@@ -291,17 +298,21 @@ class for_n(tree_node):
         target_reg = register('for-tar')
         iterable_reg = register('for-iterable')
         iterator_reg = register('for-iterator')
+        loop_reg = register('for-loop')
 
         break_to = next
-        continue_to = comp.next_i(None, break_to, target_reg, iterator_reg)
+        continue_to = comp.jump_reg_i(None, loop_reg)
 
         ctrl.break_to = break_to
         ctrl.continue_to = continue_to
-        continue_to.next = self.block.itc(ctrl, continue_to, stmt_reg)
-        ctrl.continue_to = ctrl_continue_to
-        ctrl.break_to = ctrl_break_to
+        loop_start = self.block.itc(ctrl, continue_to, stmt_reg)
 
-        next = self.target.itc(ctrl, continue_to, target_reg)
+        assign_target = self.target.itc(ctrl, loop_start, target_reg)
+        iterate = comp.next_i(assign_target, break_to, target_reg, iterator_reg)
+        ctrl.break_to = ctrl_break_to
+        ctrl.continue_to = ctrl_continue_to
+
+        next = comp.store_inst_i(iterate, loop_reg, iterate)        
         next = comp.iter_i(next, iterator_reg, iterable_reg)
         return self.iterable.itc(ctrl, next, iterable_reg)
 
@@ -343,7 +354,36 @@ class async_n(tree_node):
 class generator_n(tree_node):
     stmt:tree_node
 
-    # TODO itc
+    def itc(self, ctrl: control, next: instruction, reg: register) -> instruction:
+
+        exc_type = register('gen-exc-type')
+        exc_value = register('gen-exc-value')
+        exc_traceback = register('gen-exc-traceback')
+        exc_info = exc_type, exc_value, exc_traceback
+        raise_addr = register('gen-raise-addr')
+        raise_to = comp.jump_reg_i(None, raise_addr)
+        raise_to = comp.raise_i(raise_to, *exc_info)
+
+        stop_iter_type = register('stop-iter-type')
+        return_to = comp.assign_i(raise_to, exc_type, stop_iter_type)
+        return_to = comp.identifier_i(return_to, stop_iter_type, "StopIteration")
+        return_to = comp.return_i(return_to, exc_value, exc_traceback)
+
+        return_none = comp.bool_i(return_to, exc_value, None)
+
+        yield_value = register('gen-yield-value')
+        yield_to_addr = register('gen-yield-to-addr')
+        yield_return_addr = register('gen-yield-return-addr')
+
+        yield_to = comp.jump_reg_i(None, yield_to_addr)
+        yield_to = comp.yield_i(yield_to, yield_to_addr, yield_value, yield_return_addr)
+
+        ctrl_info = ctrl.manip, ctrl.lnum, ctrl.lidx
+        ctrl_insts = raise_to, return_to, yield_to
+        gen_ctrl = control(*ctrl_info, *ctrl_insts)
+        gen_start = self.stmt.itc(gen_ctrl, return_none, register('stmt'))
+
+        return comp.generator_i(next, reg, gen_start)
 
 @dataclass
 class or_block_n(tree_node):
@@ -353,7 +393,7 @@ class or_block_n(tree_node):
     returns value of last test
     '''
 
-    exprs:'tuple[tree_node]'
+    exprs:'tuple[tree_node, ...]'
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         return_to = next
@@ -370,7 +410,7 @@ class and_block_n(tree_node):
     returns value of last test
     '''
 
-    exprs:'tuple[tree_node]'
+    exprs:'tuple[tree_node, ...]'
 
     def itc(self, ctrl:control, next:instruction, reg:register) -> instruction:
         return_to = next
