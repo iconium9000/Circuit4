@@ -43,8 +43,28 @@ class register:
     msg:str
 
 @dataclass
+class i_exception(register):
+    exc_type:register
+    exc_val:register
+    exc_traceback:register
+
+@dataclass
+class i_return(register):
+    ret_val:register
+
+@dataclass
+class context(register):
+    tracing:context_tracing
+    stack_addr:register
+    except_addr:i_exception
+    return_addr:'i_return|None'=None
+    yield_addr:'i_return|None'=None
+    yields:bool=False
+
+    continue_addr:'register|None'=None
+    break_addr:'register|None'=None
+
 class base_instruction:
-    nxt:'base_instruction|None'
 
     def elements(self) -> 'tuple[base_instruction|register|str|None, ...]':
         raise NotImplementedError(self.__class__.__name__)
@@ -54,19 +74,6 @@ class base_instruction:
 
     def checknxt(self, c: 'compiler', n: i_node):
         raise NotImplementedError(self.__class__.__name__)
-
-@dataclass
-class context:
-    tracing:context_tracing
-    stack_addr:register
-    raise_to:'raise_i'
-
-    return_to:base_instruction=None
-    yield_to:base_instruction=None
-    yields:bool=False
-
-    continue_to:base_instruction=None
-    break_to:base_instruction=None
 
 class compiler:
 
@@ -129,6 +136,7 @@ class compiler:
 
 @dataclass
 class instruction(base_instruction):
+    ctx:context
     nxt:base_instruction
 
     def elements(self):
@@ -151,7 +159,7 @@ class instruction(base_instruction):
 # data flow
 
 @dataclass
-class new_stack_i(instruction):
+class init_stack_i(instruction):
     target:register
 
     def elements(self):
@@ -188,14 +196,12 @@ class hang_i(base_instruction):
     '''
     loop indefinitely
     '''
-    nxt:None=None
 
     def elements(self):
         return 'hang',
 
 @dataclass
 class exit_i(base_instruction):
-    nxt:None
     code:register
 
     def elements(self):
@@ -214,11 +220,10 @@ class store_inst_i(instruction):
 
 @dataclass
 class jump_reg_i(base_instruction):
-    nxt:None
-    jump:register
+    jump_addr:register
 
     def elements(self) -> 'tuple[base_instruction|register|str|None, ...]':
-        return 'jump-r', self.jump
+        return 'jump-r', self.jump_addr
     
     def newnode(self, c: 'compiler') -> i_node:
         return c.setnode(self, i_node(self))
@@ -228,7 +233,6 @@ class jump_i(base_instruction):
     '''
     go to jump
     '''
-    nxt:None
     jump:base_instruction
 
     def elements(self):
@@ -244,13 +248,6 @@ class pass_i(instruction):
 
     def newnode(self, c: 'compiler') -> i_node:
         return c.setnode(self, c.getnode(self.nxt))
-
-@dataclass
-class comment_i(pass_i):
-    lines:tuple[str, ...]
-
-    def elements(self):
-        return '#', *self.lines
 
 @dataclass
 class invert_i(instruction):
@@ -301,36 +298,13 @@ class branch_i(instruction):
         c.stack_frame.append(self)
         return self_n
 
-
-@dataclass
-class raise_i(base_instruction):
-    nxt:None
-    exc_addr:register
-    exc_type:register
-    exc_value:register
-    exc_traceback:register
-
-@dataclass
-class except_i(instruction):
-    exc_type:register
-    exc_value:register
-    exc_traceback:register
-
-    def elements(self):
-        return 'except', self.exc_type, self.exc_value, self.exc_traceback
-
 @dataclass
 class args_i(instruction):
     target:register
     args:tuple[register, ...]
 
-@dataclass
-class call_i(instruction):
-    return_val:register
-    func:register
-    args:register
-    stack_addr:register
-    raise_to:raise_i
+    def elements(self):
+        return 'args', self.target, *self.args
 
 ############################################################
 # Literals
@@ -342,8 +316,24 @@ class int_lit_i(instruction):
     def elements(self):
         return 'int-l', self.name
 
+@dataclass
+class bool_lit_i(instruction):
+    target:register
+    val:'bool|None'
+
+    def elements(self):
+        return 'bool-l', self.target, self.val
+
 ############################################################
-# Targets
+# Values
+
+@dataclass
+class idf_i(instruction):
+    target:register
+    name:str
+
+    def elements(self):
+        return 'idf', self.target, self.name
 
 @dataclass
 class idf_target_i(instruction):

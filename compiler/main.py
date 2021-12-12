@@ -22,21 +22,6 @@ class parser_manip(comp.context_tracing):
         self.n = self.p.rule_err(funs.file_r, "failed to read file")
         self.sidx, self.eidx = 0, 0
 
-        stack_addr = register('stack-addr')
-
-        exit_val = register('exit-val')
-        exit_to = comp.exit_i(None, exit_val)
-
-        exit_fail = comp.int_lit_i(exit_to, exit_val, '-1')
-        exit_success = comp.int_lit_i(exit_to, exit_val, '0')
-
-        exc_info = register('exc-typ'), register('exc-val'), register('exc-trcbk')
-        raise_to = comp.except_i(exit_fail, *exc_info)
-
-        ctx = comp.context(self, stack_addr, raise_to)
-        nxt = self.n.asm(ctx, exit_success, register('stmt'))
-        nxt = comp.new_stack_i(nxt, stack_addr)
-
         print('success')
 
 def test():
