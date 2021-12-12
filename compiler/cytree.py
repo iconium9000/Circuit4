@@ -5,14 +5,20 @@ import cycompiler as comp
 from cycompiler import context, instruction, register
 
 class tree_node:
-    def asm(self, ctx:context, next:instruction, reg:register) -> instruction:
-        ctx.error(f'itc not implemented for {self.__class__.__name__}')
+    def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
+        ctx.tracing.error(f'itc not implemented for {self.__class__.__name__}')
 
 @dataclass
 class tree_range_n(tree_node):
     node:tree_node
     start_tok:cylexer.lextok
     next_tok:cylexer.lextok
+
+    def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
+        i = ctx.tracing.update(self.start_tok.tidx, self.next_tok.tidx)
+        nxt = self.node.asm(ctx, nxt, ret)
+        ctx.tracing.update(*i)
+        return nxt
 
 @dataclass
 class number_n(tree_node):
@@ -23,7 +29,7 @@ class string_n(tree_node):
     strings:tuple[str, ...]
 
 @dataclass
-class identifier_n(tree_node):
+class idf_n(tree_node):
     name:str
 
 @dataclass
@@ -37,6 +43,12 @@ class ellipsis_n(tree_node):
 @dataclass
 class statements_n(tree_node):
     exprs:tuple[tree_node, ...]
+
+    def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
+        for expr in self.exprs[::-1]:
+            nxt = expr.asm(ctx, nxt, register('stmt'))
+        return nxt
+
 @dataclass
 class raise_n(tree_node):
     expr:tree_node
@@ -67,10 +79,29 @@ class kw_star_n(tree_node):
 class arguments_n(tree_node):
     exprs:tuple[tree_node, ...]
 
+    def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
+        args = tuple(register(f'arg-{i}') for i in range(len(self.exprs)))
+        nxt = comp.args_i(nxt, ret, *args)
+        for arg in args:
+            nxt = comp.pop_stack_i(nxt, arg, ctx.stack_addr)
+
+        for expr in self.exprs[::-1]:
+            arg = register('arg')
+            nxt = comp.push_stack_i(nxt, ctx.stack_addr, arg)
+            nxt = expr.asm(ctx, nxt, arg)
+
 @dataclass
 class call_n(tree_node):
     func:tree_node
     args:tree_node
+
+    def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
+        func, args = register('func'), register('args')
+        nxt = comp.call_i(nxt, ret, func, args, ctx.stack_addr, ctx.raise_to)
+        nxt = comp.pop_stack_i(nxt, func, ctx.stack_addr)
+        nxt = self.args.asm(ctx, nxt, args)
+        nxt = comp.push_stack_i(nxt, ctx.stack_addr, func)
+        return self.func.asm(ctx, nxt, func)
 
 @dataclass
 class attribute_ref_n(tree_node):
@@ -99,8 +130,11 @@ class subscript_target_n(tree_node):
     arg:tree_node
 
 @dataclass
-class identifier_target_n(tree_node):
+class idf_target_n(tree_node):
     name:str
+
+    def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
+        return comp.idf_target_i(nxt, ret, self.name)
 
 @dataclass
 class iter_target_n(tree_node):
@@ -133,6 +167,13 @@ class if_n(tree_node):
     test:tree_node
     true_block:tree_node
     false_block:tree_node
+
+    def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
+        false_inst = self.false_block.asm(ctx, nxt, register('false-stmt'))
+        true_inst = self.true_block.asm(ctx, nxt, register('true-stmt'))
+        test_true = register('test-true')
+        branch = comp.branch_i(true_inst, false_inst, test_true)
+        return self.test.asm(ctx, branch, test_true)
 
 @dataclass
 class pass_n(tree_node):
@@ -174,6 +215,15 @@ class and_block_n(tree_node):
 class assignment_n(tree_node):
     expr:tree_node
     targets:tuple[tree_node, ...]
+
+    def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
+        for target in self.targets[::-1]:
+            target_reg = register('target')
+            nxt = comp.assign_i(nxt, target_reg, ret)
+            nxt = comp.pop_stack_i(nxt, ret, ctx.stack_addr)
+            nxt = target.asm(ctx, nxt, target_reg)
+            nxt = comp.push_stack_i(nxt, ctx.stack_addr, ret)
+        return self.expr.asm(ctx, nxt, ret)
 
 @dataclass
 class compare_n(tree_node):

@@ -67,7 +67,7 @@ def gen_simple_stmts(p:parser):
 # identifier_r: NAME
 def identifier_r(p:parser):
     if name := p.nexttok(lex.idftok):
-        return tree.identifier_n(name.str)
+        return tree.idf_n(name.str)
 
 
 ############################################################
@@ -184,7 +184,7 @@ def gen_targets(p:parser):
 # identifier_target_r: NAME
 def identifier_target_r(p:parser):
     if t := p.nexttok(lex.idftok):
-        return tree.identifier_target_n(t.str)
+        return tree.idf_target_n(t.str)
 
 ############################################################
 # single_target_r:

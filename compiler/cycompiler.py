@@ -34,8 +34,8 @@ class context_tracing:
 class i_node:
     inst:'base_instruction'
     checked:bool=False
-    prev:'i_node|None'=None
-    next:'i_node|None'=None
+    prv:'i_node|None'=None
+    nxt:'i_node|None'=None
     undefined:'bool'=False
 
 @dataclass
@@ -44,7 +44,7 @@ class register:
 
 @dataclass
 class base_instruction:
-    next:'base_instruction|None'
+    nxt:'base_instruction|None'
 
     def elements(self) -> 'tuple[base_instruction|register|str|None, ...]':
         raise NotImplementedError(self.__class__.__name__)
@@ -52,8 +52,21 @@ class base_instruction:
     def newnode(self, c: 'compiler') -> i_node:
         raise NotImplementedError(self.__class__.__name__)
 
-    def checknext(self, c: 'compiler', n: i_node):
+    def checknxt(self, c: 'compiler', n: i_node):
         raise NotImplementedError(self.__class__.__name__)
+
+@dataclass
+class context:
+    tracing:context_tracing
+    stack_addr:register
+    raise_to:'raise_i'
+
+    return_to:base_instruction=None
+    yield_to:base_instruction=None
+    yields:bool=False
+
+    continue_to:base_instruction=None
+    break_to:base_instruction=None
 
 class compiler:
 
@@ -69,7 +82,7 @@ class compiler:
         while self.stack and (i := self.stack.pop()):
             if not (n := self.i_nodes[id(i)]).checked:
                 n.checked = True
-                i.checknext(self, n)
+                i.checknxt(self, n)
 
         for i in self.getinsts():
             e = tuple(self.getstr(s).ljust(12) for s in i.elements())
@@ -78,8 +91,8 @@ class compiler:
 
     def getinsts(self):
         for n in self.labels.list:
-            if n.prev is not None: continue
-            while n: yield n.inst; n = n.next
+            if n.prv is not None: continue
+            while n: yield n.inst; n = n.nxt
 
     def getstr(self, s:'base_instruction|register|str|None'):
         if isinstance(s, base_instruction):
@@ -116,7 +129,7 @@ class compiler:
 
 @dataclass
 class instruction(base_instruction):
-    next:base_instruction
+    nxt:base_instruction
 
     def elements(self):
         raise NotImplementedError(self.__class__.__name__)
@@ -125,28 +138,64 @@ class instruction(base_instruction):
         c.stack_frame.append(self)
         return c.setnode(self, i_node(self))
 
-    def checknext(self, c: 'compiler', n: i_node):
-        n.next = c.getnode(self.next)
-        if n.next.prev is not None:
-            c.addlabel(n.next)
-            self.next = j = jump_i(None, n.next.inst)
-            n.next = c.setnode(j, i_node(j))
-        n.next.prev = n
+    def checknxt(self, c: 'compiler', n: i_node):
+        n.nxt = c.getnode(self.nxt)
+        if n.nxt.prv is not None:
+            c.addlabel(n.nxt)
+            self.nxt = j = jump_i(None, n.nxt.inst)
+            n.nxt = c.setnode(j, i_node(j))
+        n.nxt.prv = n
         return n
 
+############################################################
+# data flow
+
+@dataclass
+class new_stack_i(instruction):
+    target:register
+
+    def elements(self):
+        return 'stk-new', self.target
+
+@dataclass
+class push_stack_i(instruction):
+    stack_addr:register
+    arg:register
+
+    def elements(self):
+        return 'stk-push', self.stack_addr, self.arg
+
+@dataclass
+class pop_stack_i(instruction):
+    target:register
+    stack_addr:register
+
+    def elements(self):
+        return 'stk-pop', self.stack_addr, self.target
+
+@dataclass
+class assign_i(instruction):
+    target:register
+    arg:register
+
+    def elements(self):
+        return 'assign', self.target, self.arg
+
+############################################################
+# instruction flow
 @dataclass
 class hang_i(base_instruction):
     '''
     loop indefinitely
     '''
-    next:None=None
+    nxt:None=None
 
     def elements(self):
         return 'hang',
 
 @dataclass
 class exit_i(base_instruction):
-    next:None
+    nxt:None
     code:register
 
     def elements(self):
@@ -165,7 +214,7 @@ class store_inst_i(instruction):
 
 @dataclass
 class jump_reg_i(base_instruction):
-    next:None
+    nxt:None
     jump:register
 
     def elements(self) -> 'tuple[base_instruction|register|str|None, ...]':
@@ -179,7 +228,7 @@ class jump_i(base_instruction):
     '''
     go to jump
     '''
-    next:None
+    nxt:None
     jump:base_instruction
 
     def elements(self):
@@ -194,7 +243,7 @@ class pass_i(instruction):
         return 'pass',
 
     def newnode(self, c: 'compiler') -> i_node:
-        return c.setnode(self, c.getnode(self.next))
+        return c.setnode(self, c.getnode(self.nxt))
 
 @dataclass
 class comment_i(pass_i):
@@ -214,7 +263,7 @@ class invert_i(instruction):
 @dataclass
 class branch_i(instruction):
     '''
-    go to next if reg is true;
+    go to nxt if reg is true;
     go to branch if reg is false
     '''
 
@@ -227,22 +276,22 @@ class branch_i(instruction):
     def newnode(self, c: 'compiler') -> i_node:
         self_n = c.setnode(self, i_node(self, undefined=True))
         branch_n = c.getnode(self.branch)
-        next_n = c.getnode(self.next)
+        nxt_n = c.getnode(self.nxt)
 
         if isinstance(i := branch_n.inst, branch_i) and i.test == self.test:
             self.branch = i.branch
             branch_n = c.getnode(i)
 
-        if isinstance(i := next_n.inst, branch_i) and i.test == self.test:
-            self.next = i.next
-            next_n = c.getnode(i)
+        if isinstance(i := nxt_n.inst, branch_i) and i.test == self.test:
+            self.nxt = i.nxt
+            nxt_n = c.getnode(i)
 
-        if branch_n == next_n:
+        if branch_n == nxt_n:
             return c.setnode(self, branch_n)
 
-        if branch_n.prev is None and next_n.prev is not None:
+        if branch_n.prv is None and nxt_n.prv is not None:
             invert_target = register('branch-invert-test')
-            br = branch_i(branch_n.inst, next_n.inst, invert_target)
+            br = branch_i(branch_n.inst, nxt_n.inst, invert_target)
             i = invert_i(br, invert_target, self.test)
             return c.setnode(self, c.getnode(i))
 
@@ -251,3 +300,55 @@ class branch_i(instruction):
         self_n.undefined = False
         c.stack_frame.append(self)
         return self_n
+
+
+@dataclass
+class raise_i(base_instruction):
+    nxt:None
+    exc_addr:register
+    exc_type:register
+    exc_value:register
+    exc_traceback:register
+
+@dataclass
+class except_i(instruction):
+    exc_type:register
+    exc_value:register
+    exc_traceback:register
+
+    def elements(self):
+        return 'except', self.exc_type, self.exc_value, self.exc_traceback
+
+@dataclass
+class args_i(instruction):
+    target:register
+    args:tuple[register, ...]
+
+@dataclass
+class call_i(instruction):
+    return_val:register
+    func:register
+    args:register
+    stack_addr:register
+    raise_to:raise_i
+
+############################################################
+# Literals
+@dataclass
+class int_lit_i(instruction):
+    target:register
+    name:str
+
+    def elements(self):
+        return 'int-l', self.name
+
+############################################################
+# Targets
+
+@dataclass
+class idf_target_i(instruction):
+    target:register
+    name:str
+
+    def elements(self):
+        return 'idf-t', self.target, self.name
