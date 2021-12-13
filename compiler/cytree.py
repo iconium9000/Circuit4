@@ -5,7 +5,7 @@ import cycompiler as comp
 from cycompiler import context, instruction, register
 
 class tree_node:
-    def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
+    def asm(self, ctx: context, nxt: instruction, trgt: register) -> instruction:
         ctx.tracing.error(f'asm not implemented for {self.__class__.__name__}')
 
 @dataclass
@@ -14,9 +14,9 @@ class tree_range_n(tree_node):
     start_tok:cylexer.lextok
     next_tok:cylexer.lextok
 
-    def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
+    def asm(self, ctx: context, nxt: instruction, trgt: register) -> instruction:
         i = ctx.tracing.update(self.start_tok.tidx, self.next_tok.tidx)
-        nxt = self.node.asm(ctx, nxt, ret)
+        nxt = self.node.asm(ctx, nxt, trgt)
         ctx.tracing.assign_context(nxt)
         ctx.tracing.update(*i)
         return nxt
@@ -50,7 +50,7 @@ class ellipsis_n(tree_node):
 class statements_n(tree_node):
     exprs:tuple[tree_node, ...]
 
-    def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
+    def asm(self, ctx: context, nxt: instruction, trgt: register) -> instruction:
         for expr in self.exprs[::-1]:
             nxt = expr.asm(ctx, nxt, register('stmt'))
         return nxt
@@ -92,12 +92,12 @@ class call_n(tree_node):
 
 @dataclass
 class attribute_ref_n(tree_node):
-    primary:tree_node
+    prim:tree_node
     attrib:str
 
 @dataclass
-class attribute_target_n(tree_node):
-    primary:tree_node
+class attribute_trgt_n(tree_node):
+    prim:tree_node
     attrib:str
 
 @dataclass
@@ -108,32 +108,32 @@ class slice_n(tree_node):
 
 @dataclass
 class subscript_n(tree_node):
-    primary:tree_node
+    prim:tree_node
     arg:tree_node
 
 @dataclass
-class subscript_target_n(tree_node):
-    primary:tree_node
+class subscript_trgt_n(tree_node):
+    prim:tree_node
     arg:tree_node
 
 @dataclass
-class idf_target_n(tree_node):
+class idf_trgt_n(tree_node):
     name:str
 
 @dataclass
-class iter_target_n(tree_node):
+class iter_trgt_n(tree_node):
     expr:tree_node
 
 @dataclass
-class tuple_target_n(tree_node):
-    targets:tuple[tree_node, ...]
+class tuple_trgt_n(tree_node):
+    trgts:tuple[tree_node, ...]
 
 @dataclass
 class tuple_n(tree_node):
     exprs:tuple[tree_node, ...]
 
 @dataclass
-class list_target_n(tree_node):
+class list_trgt_n(tree_node):
     exprs:tuple[tree_node, ...]
 
 @dataclass
@@ -142,7 +142,7 @@ class list_n(tree_node):
 
 @dataclass
 class for_n(tree_node):
-    target:tree_node
+    trgt:tree_node
     iterable:tree_node
     block:tree_node
 
@@ -191,7 +191,7 @@ class and_block_n(tree_node):
 @dataclass
 class assignment_n(tree_node):
     expr:tree_node
-    targets:tuple[tree_node, ...]
+    trgts:tuple[tree_node, ...]
 
 @dataclass
 class compare_n(tree_node):

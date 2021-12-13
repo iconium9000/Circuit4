@@ -192,7 +192,7 @@ if "star_targets_list_seq_r: TODO":
 if "identifier_target_r: NAME":
     def identifier_target_r(p:parser):
         if t := p.nexttok(lex.idftok):
-            return tree.idf_target_n(t.str)
+            return tree.idf_trgt_n(t.str)
 
 ############################################################
 if """

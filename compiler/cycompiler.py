@@ -53,7 +53,7 @@ class i_exception(register):
 
 @dataclass
 class i_return(register):
-    ret_val:register
+    val:register
 
 @dataclass
 class context(register):
