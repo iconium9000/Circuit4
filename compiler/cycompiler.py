@@ -30,9 +30,12 @@ class context_tracing:
     def update(self, startidx:int, stopidx:int) -> tuple[int,int]:
         raise NotImplemented(startidx, stopidx)
 
+    def assign_context(self, i:'instruction') -> None:
+        raise NotImplemented(id(i))
+
 @dataclass
 class i_node:
-    inst:'base_instruction'
+    inst:'instruction'
     checked:bool=False
     prv:'i_node|None'=None
     nxt:'i_node|None'=None
@@ -64,22 +67,19 @@ class context(register):
     continue_addr:'register|None'=None
     break_addr:'register|None'=None
 
-class base_instruction:
+class instruction:
 
-    def elements(self) -> 'tuple[base_instruction|register|str|None, ...]':
+    def elements(self) -> 'tuple[instruction|register|str|None, ...]':
         raise NotImplementedError(self.__class__.__name__)
 
     def newnode(self, c: 'compiler') -> i_node:
-        raise NotImplementedError(self.__class__.__name__)
-
-    def checknxt(self, c: 'compiler', n: i_node):
-        raise NotImplementedError(self.__class__.__name__)
+        return c.setnode(self, i_node(self))
 
 class compiler:
 
-    def __init__(self, inst:base_instruction):
+    def __init__(self, inst:instruction):
         self.i_nodes:dict[int,i_node] = {}
-        self.stack:list[base_instruction] = []
+        self.stack:list[nxt_instruction] = []
 
         self.labels = listmap[int,i_node]()
         self.registers = listmap[int,register]()
@@ -101,8 +101,8 @@ class compiler:
             if n.prv is not None: continue
             while n: yield n.inst; n = n.nxt
 
-    def getstr(self, s:'base_instruction|register|str|None'):
-        if isinstance(s, base_instruction):
+    def getstr(self, s:'instruction|register|str|None'):
+        if isinstance(s, instruction):
             return self.label(s)
         elif isinstance(s, register):
             return self.reg(s)
@@ -110,7 +110,7 @@ class compiler:
             return 'None'
         return s
 
-    def label(self, i:base_instruction):
+    def label(self, i:instruction):
         n = self.i_nodes[id(i)]
         # self.labels[id(n)] = n
         idx = self.labels.map.get(id(n))
@@ -125,32 +125,32 @@ class compiler:
     def addlabel(self, n:i_node):
         self.labels[id(n)] = n
 
-    def getnode(self, i:base_instruction):
+    def getnode(self, i:instruction):
         n = self.i_nodes.get(id(i)) or i.newnode(self)
         assert not n.undefined
         return n
 
-    def setnode(self, i:base_instruction, n:i_node):
+    def setnode(self, i:instruction, n:i_node):
         self.i_nodes[id(i)] = n
         return n
 
 @dataclass
-class instruction(base_instruction):
+class nxt_instruction(instruction):
     ctx:context
-    nxt:base_instruction
+    nxt:instruction
 
     def elements(self):
         raise NotImplementedError(self.__class__.__name__)
 
-    def newnode(self, c: 'compiler') -> i_node:
-        c.stack_frame.append(self)
+    def newnode(self, c: compiler) -> i_node:
+        c.stack.append(self)
         return c.setnode(self, i_node(self))
 
-    def checknxt(self, c: 'compiler', n: i_node):
+    def checknxt(self, c: compiler, n: i_node):
         n.nxt = c.getnode(self.nxt)
         if n.nxt.prv is not None:
             c.addlabel(n.nxt)
-            self.nxt = j = jump_i(None, n.nxt.inst)
+            self.nxt = j = jump_i(n.nxt.inst)
             n.nxt = c.setnode(j, i_node(j))
         n.nxt.prv = n
         return n
@@ -159,14 +159,14 @@ class instruction(base_instruction):
 # data flow
 
 @dataclass
-class init_stack_i(instruction):
+class init_stack_i(nxt_instruction):
     target:register
 
     def elements(self):
         return 'stk-new', self.target
 
 @dataclass
-class push_stack_i(instruction):
+class push_stack_i(nxt_instruction):
     stack_addr:register
     arg:register
 
@@ -174,7 +174,7 @@ class push_stack_i(instruction):
         return 'stk-push', self.stack_addr, self.arg
 
 @dataclass
-class pop_stack_i(instruction):
+class pop_stack_i(nxt_instruction):
     target:register
     stack_addr:register
 
@@ -182,7 +182,7 @@ class pop_stack_i(instruction):
         return 'stk-pop', self.stack_addr, self.target
 
 @dataclass
-class assign_i(instruction):
+class assign_i(nxt_instruction):
     target:register
     arg:register
 
@@ -192,7 +192,7 @@ class assign_i(instruction):
 ############################################################
 # instruction flow
 @dataclass
-class hang_i(base_instruction):
+class hang_i(instruction):
     '''
     loop indefinitely
     '''
@@ -201,56 +201,50 @@ class hang_i(base_instruction):
         return 'hang',
 
 @dataclass
-class exit_i(base_instruction):
+class exit_i(instruction):
     code:register
 
     def elements(self):
         return 'exit', self.code
 
-    def newnode(self, c: 'compiler') -> i_node:
-        return c.setnode(self, i_node(self))
-
 @dataclass
-class store_inst_i(instruction):
+class store_inst_i(nxt_instruction):
     target:register
-    inst:base_instruction
+    inst:instruction
 
     def elements(self):
         return 'store-i', self.target, self.inst
 
 @dataclass
-class jump_reg_i(base_instruction):
+class jump_reg_i(instruction):
     jump_addr:register
 
-    def elements(self) -> 'tuple[base_instruction|register|str|None, ...]':
+    def elements(self) -> 'tuple[instruction|register|str|None, ...]':
         return 'jump-r', self.jump_addr
-    
-    def newnode(self, c: 'compiler') -> i_node:
-        return c.setnode(self, i_node(self))
 
 @dataclass
-class jump_i(base_instruction):
+class jump_i(instruction):
     '''
     go to jump
     '''
-    jump:base_instruction
+    jump:instruction
 
     def elements(self):
         return 'jump', self.jump
 
-    def newnode(self, c: 'compiler') -> i_node:
+    def newnode(self, c: compiler) -> i_node:
         return c.setnode(self, c.getnode(self.jump))
 
 @dataclass
-class pass_i(instruction):
+class pass_i(nxt_instruction):
     def elements(self):
         return 'pass',
 
-    def newnode(self, c: 'compiler') -> i_node:
+    def newnode(self, c: compiler) -> i_node:
         return c.setnode(self, c.getnode(self.nxt))
 
 @dataclass
-class invert_i(instruction):
+class invert_i(nxt_instruction):
     target:register
     arg:register
 
@@ -258,19 +252,19 @@ class invert_i(instruction):
         return 'invert', self.target, self.arg
 
 @dataclass
-class branch_i(instruction):
+class branch_i(nxt_instruction):
     '''
     go to nxt if reg is true;
     go to branch if reg is false
     '''
 
-    branch:base_instruction
+    branch:instruction
     test:register
 
     def elements(self):
         return 'if', self.branch, self.test
 
-    def newnode(self, c: 'compiler') -> i_node:
+    def newnode(self, c: compiler) -> i_node:
         self_n = c.setnode(self, i_node(self, undefined=True))
         branch_n = c.getnode(self.branch)
         nxt_n = c.getnode(self.nxt)
@@ -288,18 +282,18 @@ class branch_i(instruction):
 
         if branch_n.prv is None and nxt_n.prv is not None:
             invert_target = register('branch-invert-test')
-            br = branch_i(branch_n.inst, nxt_n.inst, invert_target)
-            i = invert_i(br, invert_target, self.test)
+            br = branch_i(self.ctx, branch_n.inst, nxt_n.inst, invert_target)
+            i = invert_i(self.ctx, br, invert_target, self.test)
             return c.setnode(self, c.getnode(i))
 
         c.addlabel(branch_n)
 
         self_n.undefined = False
-        c.stack_frame.append(self)
+        c.stack.append(self)
         return self_n
 
 @dataclass
-class args_i(instruction):
+class args_i(nxt_instruction):
     target:register
     args:tuple[register, ...]
 
@@ -309,7 +303,7 @@ class args_i(instruction):
 ############################################################
 # Literals
 @dataclass
-class int_lit_i(instruction):
+class int_lit_i(nxt_instruction):
     target:register
     name:str
 
@@ -317,7 +311,7 @@ class int_lit_i(instruction):
         return 'int-l', self.name
 
 @dataclass
-class bool_lit_i(instruction):
+class bool_lit_i(nxt_instruction):
     target:register
     val:'bool|None'
 
@@ -328,7 +322,7 @@ class bool_lit_i(instruction):
 # Values
 
 @dataclass
-class idf_i(instruction):
+class idf_i(nxt_instruction):
     target:register
     name:str
 
@@ -336,7 +330,7 @@ class idf_i(instruction):
         return 'idf', self.target, self.name
 
 @dataclass
-class idf_target_i(instruction):
+class idf_target_i(nxt_instruction):
     target:register
     name:str
 

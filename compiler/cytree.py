@@ -6,7 +6,7 @@ from cycompiler import context, instruction, register
 
 class tree_node:
     def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
-        ctx.tracing.error(f'itc not implemented for {self.__class__.__name__}')
+        ctx.tracing.error(f'asm not implemented for {self.__class__.__name__}')
 
 @dataclass
 class tree_range_n(tree_node):
@@ -17,6 +17,7 @@ class tree_range_n(tree_node):
     def asm(self, ctx: context, nxt: instruction, ret: register) -> instruction:
         i = ctx.tracing.update(self.start_tok.tidx, self.next_tok.tidx)
         nxt = self.node.asm(ctx, nxt, ret)
+        ctx.tracing.assign_context(nxt)
         ctx.tracing.update(*i)
         return nxt
 

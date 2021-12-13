@@ -4,25 +4,38 @@ from typing import Iterable, NoReturn
 import cyparser
 import cyparsefuns as funs
 import cycompiler as comp
-from cycompiler import register
+from cycompiler import context, register, instruction
 
 class parser_manip(comp.context_tracing):
+
+    def error(self, msg: str) -> NoReturn:
+        tok = self.p.lexer.toks[self.sidx]
+        self.p.lexer.error(msg, tok.lnum, tok.lidx)
 
     def update(self, startidx: int, stopidx: int) -> tuple[int, int]:
         r = self.sidx, self.eidx
         self.sidx, self.eidx = startidx, stopidx
         return r
 
-    def error(self, msg: str) -> NoReturn:
-        tok = self.p.lexer.toks[self.sidx]
-        self.p.lexer.error(msg, tok.lnum, tok.lidx)
+    def assign_context(self, i: instruction):
+        self.insts[id(i)] = self.sidx, self.eidx
 
     def __init__(self, filename:str, file:str):
         self.p = cyparser.parser(filename, file)
         self.n = self.p.rule_err(funs.file_r, "failed to read file")
+        self.insts:dict[int,tuple[int,int]] = {}
         self.sidx, self.eidx = 0, 0
 
-        print('success')
+        ctx = context('prog-ctx', self,
+            register('stk-addr'),
+            comp.i_exception('prog-exc-addr',
+                register('prog-exc-type'),
+                register('prog-exc-val'),
+                register('prog-exc-trcbk')))
+        exit_code = register('prog-exit')
+        exit_nxt = comp.exit_i(exit_code)
+        exit_nxt = comp.bool_lit_i(ctx, exit_nxt, exit_code, True)
+        return self.n.asm(ctx, exit_nxt, register('prog-stmt'))
 
 def test():
     parser_manip('test.py',
