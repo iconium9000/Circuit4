@@ -26,16 +26,13 @@ class parser_manip(comp.context_tracing):
         self.insts:dict[int,tuple[int,int]] = {}
         self.sidx, self.eidx = 0, 0
 
-        ctx = context('prog-ctx', self,
-            register('stk-addr'),
-            comp.i_exception('prog-exc-addr',
-                register('prog-exc-type'),
-                register('prog-exc-val'),
-                register('prog-exc-trcbk')))
+        ctx = context(self)
         exit_code = register('prog-exit')
-        exit_nxt = comp.exit_i(exit_code)
-        exit_nxt = comp.bool_lit_i(ctx, exit_nxt, exit_code, True)
-        return self.n.asm(ctx, exit_nxt, register('prog-stmt'))
+        nxt = comp.exit_i(exit_code)
+        nxt = comp.bool_lit_i(ctx, nxt, exit_code, True)
+        i = self.n.asm(ctx, nxt, register('prog-block'))
+
+        comp.compiler(i)
 
 def test():
     parser_manip('test.py',

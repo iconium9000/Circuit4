@@ -89,7 +89,7 @@ star_target_r:
             return p.rule(target_with_star_atom_r)
         elif p.getop({'*'}): return
         elif r := p.rule(target_with_star_atom_r):
-            return tree.iter_target_n(r)
+            return tree.iter_trgt_n(r)
 
 
 ############################################################
@@ -102,7 +102,7 @@ star_targets_r:
         if (r := p.rule(star_target_r)) and not p.nextop({','}):
             return r
         if args := tuple(gen_star_targets(p)):
-            return tree.tuple_target_n(args)
+            return tree.tuple_trgt_n(args)
 
     def gen_star_targets(p:parser):
         if r := p.rule(star_target_r):
@@ -148,9 +148,9 @@ if "p_star_targets_tuple_seq_r: TODO":
 
     def tuple_seq_r(p:parser):
         r = p.rule(star_target_r)
-        if not r: return tree.tuple_target_n(tuple())
+        if not r: return tree.tuple_trgt_n(tuple())
         if not p.nextop({','}): return
-        return tree.tuple_target_n(tuple(gen_tuple_seq(p,r)))
+        return tree.tuple_trgt_n(tuple(gen_tuple_seq(p,r)))
 
     def gen_tuple_seq(p:parser, r:tree.tree_node):
         yield r
@@ -180,7 +180,7 @@ if "star_targets_list_seq_r: TODO":
 
     def targets_r(p:parser):
         if args := tuple(gen_targets(p)):
-            return tree.list_target_n(args)
+            return tree.list_trgt_n(args)
 
     def gen_targets(p:parser):
         while r := p.rule(star_target_r):
@@ -825,11 +825,11 @@ single_subscript_attribute_target_r:
             if p.tok.str == '.':
                 p.next()
                 if n := p.nexttok(lex.idftok):
-                    return tree.attribute_target_n(a, n.str)
+                    return tree.attribute_trgt_n(a, n.str)
                 p.error("no identifier after '.' operator")
             elif p.tok.str == '[':
                 if s := p.ignore_tracking('[',slices_r,']'):
-                    return tree.subscript_target_n(a, s)
+                    return tree.subscript_trgt_n(a, s)
                 p.error("no slice after '[' operator")
 
 
@@ -1022,7 +1022,7 @@ if "atom_r: TODO":
 
     def number_r(p:parser):
         if tok := p.nexttok(lex.numtok):
-            return tree.number_n(tok.str)
+            return tree.int_lit_n(tok.str)
 
     def bool_ellipsis_r(p:parser):
         if op := p.nextop({'True','False','None','...'}):

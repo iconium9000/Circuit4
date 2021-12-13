@@ -1,4 +1,4 @@
-if 10 == 10:
+if 5 < 10 == 10:
     asdf:int = 1
     asdf += 1
 elif hax := 10: help[10,10] = 3 % 1
