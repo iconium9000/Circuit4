@@ -62,7 +62,7 @@ class statements_n(tree_node):
 
     def asm(self, ctx: context, nxt: instruction, trgt: register) -> instruction:
         for expr in self.exprs[::-1]:
-            nxt = expr.asm(ctx, nxt, register('stmt'))
+            nxt = expr.asm(ctx, nxt, ctx.reg('stmt'))
         return nxt
 
 @dataclass
@@ -74,13 +74,10 @@ class yield_n(tree_node):
     expr:tree_node
 
     def asm(self, ctx: context, nxt: instruction, trgt: register) -> instruction:
-        addr = ctx.yield_addr
-        if addr is not None:
-            nxt = comp.copy_i(ctx, nxt, trgt, addr.val)
-            jump_reg = comp.jump_reg_i(addr)
-            nxt = comp.store_inst_i(ctx, jump_reg, addr.return_addr, nxt)
-            return self.expr.asm(ctx, nxt, addr.val)
-        ctx.tracing.error("'yield' outside function")
+        nxt = comp.copy_reg_i(ctx, nxt, trgt, ctx.yield_send_val)
+        ynxt = comp.jump_reg_i(ctx.yield_addr)
+        nxt = comp.store_inst_i(ctx, ynxt, ctx.yield_ret_addr, nxt)
+        return self.expr.asm(ctx, nxt, ctx.yield_val)
 
 @dataclass
 class hint_n(tree_node):
@@ -122,6 +119,7 @@ class call_n(tree_node):
     func:tree_node
     args:tree_node
 
+    # TODO
     def asm(self, ctx: context, nxt: instruction, trgt: register) -> instruction:
         func = ctx.reg('call-func')
         args = ctx.reg('call-args')
@@ -223,19 +221,17 @@ class for_n(tree_node):
     block:tree_node
 
     def asm(self, ctx: context, nxt: instruction, trgt: register) -> instruction:
-        ctx_continue_addr = ctx.continue_addr
-        break_addr = ctx.reg('brk-addr')
-        continue_addr = comp.i_loop('cont-addr', ctx, break_addr)
-        ctx.continue_addr = continue_addr
-
         target = ctx.reg('target')
         iterator = ctx.reg('iterator')
-        ret_addr = comp.i_return('ret-addr', ctx, register('ret-val'))
+        next_ret_val = ctx.reg('nxt-ret-val')
 
+        nxt = comp.pop_stack_i(ctx, nxt, ctx.continue_addr, ctx)
+        nxt = comp.pop_stack_i(ctx, nxt, ctx.break_addr, ctx)
         break_to = nxt
-        nxt = comp.jump_reg_i(continue_addr)
-        nxt = self.block.asm(ctx, nxt, register('for-block'))
-        nxt = comp.next_i(ctx, nxt, target, iterator, ret_addr)
+
+        nxt = comp.jump_reg_i(ctx.continue_addr)
+        nxt = self.block.asm(ctx, nxt, register('stmt'))
+        nxt = comp.next_i(ctx, nxt, target, iterator, break_to, next_ret_val)
         continue_to = nxt
 
         iterable = ctx.reg('iterable')
@@ -243,11 +239,11 @@ class for_n(tree_node):
         nxt = self.iterable.asm(ctx, nxt, iterable)
         nxt = self.trgt.asm(ctx, nxt, target)
 
-        nxt = comp.store_inst_i(ctx, nxt, ret_addr, break_to)
-        nxt = comp.store_inst_i(ctx, nxt, break_addr, break_to)
-        nxt = comp.store_inst_i(ctx, nxt, continue_addr, continue_to)
+        nxt = comp.store_inst_i(ctx, nxt, ctx.continue_addr, continue_to)
+        nxt = comp.store_inst_i(ctx, nxt, ctx.break_addr, break_to)
 
-        ctx.continue_addr = ctx_continue_addr
+        nxt = comp.push_stack_i(ctx, nxt, ctx, ctx.break_addr)
+        nxt = comp.push_stack_i(ctx, nxt, ctx, ctx.continue_addr)
         return nxt
 
 @dataclass
@@ -257,11 +253,9 @@ class if_n(tree_node):
     false_block:tree_node
 
     def asm(self, ctx: context, nxt: instruction, trgt: register) -> instruction:
-        false_block = register('if-false-block')
-        false_block = self.false_block.asm(ctx, nxt, false_block)
-        true_block = register('if-true-block')
-        true_block = self.true_block.asm(ctx, nxt, true_block)
-        test = register('if-test')
+        false_block = self.false_block.asm(ctx, nxt, ctx.reg('stmt'))
+        true_block = self.true_block.asm(ctx, nxt, ctx.reg('stmt'))
+        test = ctx.reg('if-test')
         branch = comp.branch_i(ctx, true_block, false_block, test)
         return self.test.asm(ctx, branch, test)
 
@@ -284,11 +278,10 @@ class generator_n(tree_node):
     stmt:tree_node
 
     def asm(self, ctx: context, nxt: instruction, trgt: register) -> instruction:
-        gctx = context(ctx.tracing).return_to().yield_to()
-        gnxt = comp.jump_reg_i(gctx.return_addr)
-        gnxt = comp.bool_lit_i(gctx, gnxt, gctx.return_addr.val, None)
-        gnxt = self.stmt.asm(gctx, gnxt, gctx.reg('gen-block'))
-        return comp.generator_i(ctx, nxt, trgt, gnxt, gctx)
+        gnxt = comp.jump_reg_i(ctx.return_addr)
+        gnxt = comp.bool_lit_i(ctx, gnxt, ctx.return_val, None)
+        gnxt = self.stmt.asm(ctx, gnxt, ctx.reg('stmt'))
+        return comp.generator_i(ctx, nxt, trgt, gnxt)
 
 @dataclass
 class or_block_n(tree_node):
@@ -329,9 +322,9 @@ class compare_n(tree_node):
 
     def asm(self, ctx: context, nxt: instruction, trgt: register) -> instruction:
         return_to = nxt
-        arga, argb = trgt, register(f'comp-{len(self.compares)}')
+        arga, argb = trgt, ctx.reg(f'comp-{len(self.compares)}')
         for i, (op, expr) in tuple(enumerate(self.compares))[::-1]:
-            arga = register(f'comp-{i}')
+            arga = ctx.reg(f'comp-{i}')
             nxt = comp.branch_i(ctx, nxt, return_to, trgt)
             nxt = comp.binary_op_i(ctx, nxt, op, trgt, arga, argb)
             nxt = expr.asm(ctx, nxt, argb)

@@ -49,54 +49,26 @@ class register:
 class ctx_register(register):
     ctx:register
 
-@dataclass
-class i_exception(ctx_register):
-    exc_type:register
-    exc_val:register
-    exc_traceback:register
-
-@dataclass
-class i_return(ctx_register):
-    val:register
-
-@dataclass
-class i_yield(ctx_register):
-    val:register
-    return_addr:register
-    yields:bool=False
-
-@dataclass
-class i_loop(ctx_register):
-    break_addr:register
-
 class context(register):
+    def reg(self, msg):
+        return ctx_register(msg, self)
 
     def __init__(self, t:context_tracing):
         super().__init__('ctx-addr')
         self.tracing = t
         self.stack_addr = self.reg('stk-addr')
-        self.except_addr = i_exception('exc-addr', self,
-            self.reg('exc-type'),
-            self.reg('exc-val'),
-            self.reg('exc-trcbk'))
-
-        self.return_addr:'i_return|None' = None
-        self.yield_addr:'i_yield|None' = None
-        self.continue_addr:'i_loop|None' = None
-
-    def return_to(self):
-        self.return_addr = i_return('ret-addr', self,
-            self.reg('ret-val'))
-        return self
-
-    def yield_to(self):
-        self.yield_addr = i_yield('yld-addr', self,
-            self.reg('yld-val'),
-            self.reg('yld-ret-addr'))
-        return self
-
-    def reg(self, msg):
-        return ctx_register(msg, self)
+        self.exc_addr = self.reg('exc-addr')
+        self.exc_type = self.reg('exc-type')
+        self.exc_val = self.reg('exc-val')
+        self.exc_traceback = self.reg('exc-traceback')
+        self.return_addr = self.reg('ret-addr')
+        self.return_val = self.reg('ret-val')
+        self.yield_addr = self.reg('yld-addr')
+        self.yield_val = self.reg('yld-val')
+        self.yield_ret_addr = self.reg('yld-ret-addr')
+        self.yield_send_val = self.reg('yld-send-val')
+        self.continue_addr = self.reg('cont-addr')
+        self.break_addr = self.reg('break-addr')
 
 class instruction:
 
@@ -238,12 +210,12 @@ class assign_i(nxt_instruction):
         return 'assign', self.target_ref, self.arg
 
 @dataclass
-class copy_i(nxt_instruction):
+class copy_reg_i(nxt_instruction):
     target:register
     arg:register
 
     def elements(self):
-        return 'copy', self.target, self.arg
+        return 'copy-r', self.target, self.arg
 
 ############################################################
 # instruction flow
@@ -390,24 +362,31 @@ class iter_i(nxt_instruction):
 class next_i(nxt_instruction):
     target:register
     iterator:register
-    return_addr:i_return
+    return_to:instruction
+    return_val:register
 
     def elements(self):
-        return 'next', self.target, self.iterator, self.return_addr
+        return 'next', self.target, self.iterator, self.return_to, self.return_val
+
+    def newnode(self, c: compiler) -> i_node:
+        self_n = c.setnode(self, i_node(self))
+        return_n = c.getnode(self.return_to)
+        c.addlabel(return_n)
+        c.stack.append(self)
+        return self_n
 
 @dataclass
 class generator_i(nxt_instruction):
     target:register
-    jump:instruction
-    gen_ctx:context
+    gstart:instruction
 
     def elements(self):
-        return 'generator', self.target, self.jump, self.gen_ctx
+        return 'generator', self.target, self.gstart
 
     def newnode(self, c: compiler) -> i_node:
         self_n = c.setnode(self, i_node(self))
-        jump_n = c.getnode(self.jump)
-        c.addlabel(jump_n)
+        gstart_n = c.getnode(self.gstart)
+        c.addlabel(gstart_n)
         c.stack.append(self)
         return self_n
 
