@@ -3,6 +3,29 @@
 class register:
     pass
 
+class context_paths:
+
+    def exclude_nxt(self, join:'context_paths|None'=None):
+        # TODO
+        # saves nxt path
+        # removes nxt path from path map
+        # replaces with empty path
+        # ret = nxt
+        # if join is not None
+        #   joins self paths and join paths
+        # returns joined paths, ret
+        return context_paths(), context()
+
+    def join_nxt(self, ctx:'context'):
+        # TODO
+        return self
+
+    def join(self, *paths:'context_paths'):
+        # TODO
+        # join each ctx in both self and paths
+        # return context_paths object with updated values
+        return self
+
 class context:
 
     def __init__(self) -> None:
@@ -20,7 +43,7 @@ class context:
         # TODO
         return context()
 
-    def branch_assert(self):
+    def branch(self, join:context_paths):
         # TODO
         # creates two branches
         #   the first assumes the tail value resolves to true
@@ -28,9 +51,9 @@ class context:
         # if the value cannot be cast to a boolean
         #   both of the returned paths
         #   will be marked as exc paths
-        return context(), context()
+        return context_paths(), context(), context()
 
-    def clearval(self):
+    def clr_tail_val(self):
         # TODO
         # sets the tail value to unbound
         return context()
@@ -103,41 +126,14 @@ class context:
         # TODO
         return context_paths()
 
-    def loop(self, paths:'context_paths'):
+    def loop(self, paths:context_paths):
         # TODO
         return context_paths()
 
-    def generator(self, paths:'context_paths'):
+    def generator(self, paths:context_paths):
         # TODO
         return context_paths()
 
     def iterator(self, iterable:register):
         # TODO
         return context_paths()
-
-class context_paths:
-
-    def setrange(self, s:int, e:int):
-        # TODO
-        return s,e
-
-    def exclude_nxt(self, join:'context_paths|None'=None):
-        # TODO
-        # saves nxt path
-        # removes nxt path from path map
-        # replaces with empty path
-        # ret = nxt
-        # if join is not None
-        #   joins self paths and join paths
-        # returns joined paths, ret
-        return context_paths(), context()
-
-    def join_nxt(self, ctx:context):
-        # TODO
-        return self
-
-    def join(self, *paths:'context_paths'):
-        # TODO
-        # join each ctx in both self and paths
-        # return context_paths object with updated values
-        return self

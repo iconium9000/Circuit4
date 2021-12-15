@@ -61,7 +61,7 @@ class statements_n(tree_node):
         paths = context_paths()
         for expr in self.exprs:
             paths, ctx = expr.asm(ctx).exclude_nxt(paths)
-            ctx = ctx.clearval()
+            ctx = ctx.clr_tail_val()
         return paths.join_nxt(ctx)
 
 @dataclass
@@ -246,7 +246,7 @@ class if_n(tree_node):
 
     def asm(self, ctx: context) -> context_paths:
         paths, ctx = self.test.asm(ctx).exclude_nxt()
-        ctx_true, ctx_false = ctx.branch_assert()
+        paths, ctx_true, ctx_false = ctx.branch(paths)
         true_paths = self.true_block.asm(ctx_true)
         false_paths = self.false_block.asm(ctx_false)
         return paths.join(true_paths, false_paths)
@@ -255,7 +255,7 @@ class if_n(tree_node):
 class pass_n(tree_node):
     
     def asm(self, ctx: context) -> context_paths:
-        return context_paths().join_nxt(ctx.clearval())
+        return context_paths().join_nxt(ctx.clr_tail_val())
 
 @dataclass
 class continue_n(tree_node):
@@ -283,6 +283,14 @@ class or_block_n(tree_node):
 
     exprs:'tuple[tree_node, ...]'
 
+    def asm(self, ctx: context) -> context_paths:
+        paths = context_paths()
+        for expr in self.exprs:
+            paths, ctx = expr.asm(ctx).exclude_nxt(paths)
+            paths, if_true, ctx = ctx.branch(paths)
+            paths = paths.join_nxt(if_true)
+        return paths.join_nxt(ctx)
+
 @dataclass
 class and_block_n(tree_node):
     '''
@@ -292,6 +300,14 @@ class and_block_n(tree_node):
     '''
 
     exprs:'tuple[tree_node, ...]'
+
+    def asm(self, ctx: context) -> context_paths:
+        paths = context_paths()
+        for expr in self.exprs:
+            paths, ctx = expr.asm(ctx).exclude_nxt(paths)
+            paths, ctx, if_false = ctx.branch(paths)
+            paths = paths.join_nxt(if_false)
+        return paths.join_nxt(ctx)
 
 @dataclass
 class assignment_n(tree_node):
@@ -320,8 +336,8 @@ class compare_n(tree_node):
         for op, expr in self.compares:
             paths, ctx = expr.asm(ctx).exclude_nxt(paths)
             paths, ctx = ctx.binop(op, arg, arg := ctx.tail_val()).exclude_nxt(paths)
-            ctx, nxt = ctx.branch_assert()
-            paths = paths.join_nxt(nxt)
+            paths, ctx, if_false = ctx.branch(paths)
+            paths = paths.join_nxt(if_false)
         return paths.join_nxt(ctx)
 
 @dataclass
