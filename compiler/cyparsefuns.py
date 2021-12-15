@@ -89,7 +89,7 @@ star_target_r:
             return p.rule(target_with_star_atom_r)
         elif p.getop({'*'}): return
         elif r := p.rule(target_with_star_atom_r):
-            return tree.iter_trgt_n(r)
+            return tree.star_trgt_n(r)
 
 
 ############################################################

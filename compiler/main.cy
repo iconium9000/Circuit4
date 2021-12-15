@@ -9,3 +9,4 @@ else:
         i:list[int] = [1,2,3,4,5]
     t = tuple(i for i in range(10))
 
+m = a - b / c ** d // h is not (-g,) % i != j == k > 17 > 3 and l or not not n
