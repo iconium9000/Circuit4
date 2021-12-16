@@ -24,13 +24,13 @@ class program_n(tree_node):
     stmt:tree_node
     
     def asm(self, ctx: context) -> context_paths:
-        paths = self.stmt.asm(ctx)
-        raise NotImplementedError('todo')
+        paths = self.stmt.asm(ctx.newframe())
+        return ctx.program(paths)
 
 @dataclass
 class int_lit_n(tree_node):
     num:str
-    
+
     def asm(self, ctx: context) -> context_paths:
         return ctx.lit_int(self.num)
 
