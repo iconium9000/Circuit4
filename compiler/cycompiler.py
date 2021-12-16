@@ -58,9 +58,9 @@ class context:
         # sets the tail value to unbound
         return context()
 
-    def tail_val(self, paths:context_paths):
+    def tail_val(self):
         # TODO
-        return context_paths(), context(), register()
+        return context(), register()
 
     def program(self, paths:context_paths):
         # TODO
