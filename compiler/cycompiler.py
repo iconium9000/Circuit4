@@ -58,12 +58,13 @@ class context:
         # sets the tail value to unbound
         return context()
 
-    def tail_val(self):
+    def tail_val(self, paths:context_paths):
         # TODO
-        # returns tail value
-        # the default tail value is unbound
-        # it is important to manage tail values
-        return register()
+        return context_paths(), context(), register()
+
+    def program(self, paths:context_paths):
+        # TODO
+        return context_paths()
 
     def lookup_idf(self, name:str):
         # TODO
