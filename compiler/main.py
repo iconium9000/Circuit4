@@ -14,6 +14,10 @@ class parser_manip:
 
         ctx = comp.context()
         i = n.asm(ctx)
+        asm = comp.asm()
+        i.asm(asm)
+        for l in asm.list():
+            print(l)
 
         print('success')
 

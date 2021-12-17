@@ -1,9 +1,14 @@
 # cycompiler.py
+import cyassembler as assy
+from cyassembler import asm
 
 class register:
     pass
 
 class context_paths:
+
+    def asm(self, a:asm):
+        print('asm')
 
     def exclude_nxt(self, join:'context_paths|None'=None):
         # TODO
@@ -15,6 +20,10 @@ class context_paths:
         #   joins self paths and join paths
         # returns joined paths, ret
         return context_paths(), context()
+
+    def del_vals(self, *vals:register):
+        # TODO
+        return context_paths()
 
     def join_nxt(self, ctx:'context'):
         # TODO

@@ -75,7 +75,8 @@ class yield_n(tree_node):
     def asm(self, ctx: context) -> context_paths:
         paths, ctx = self.expr.asm(ctx).exclude_nxt()
         ctx, expr = ctx.tail_val()
-        return ctx.yield_expr(expr).join(paths)
+        paths = ctx.yield_expr(expr).join(paths)
+        return paths.del_vals(expr)
 
 @dataclass
 class hint_n(tree_node):
@@ -87,7 +88,8 @@ class hint_n(tree_node):
         ctx, ref = ctx.tail_val()
         paths, ctx = self.hint.asm(ctx).exclude_nxt(paths)
         ctx, hint = ctx.tail_val()
-        return ctx.hint(ref, hint).join(paths)
+        paths = ctx.hint(ref, hint).join(paths)
+        return paths.del_vals(ref, hint)
 
 @dataclass
 class kwarg_n(tree_node):
@@ -113,7 +115,8 @@ class arguments_n(tree_node):
             paths, ctx = expr.asm(ctx).exclude_nxt(paths)
             ctx, arg = ctx.tail_val()
             values.append(arg)
-        return ctx.group('args', *values).join(paths)
+        paths = ctx.group('args', *values).join(paths)
+        return paths.del_vals(*values)
 
 @dataclass
 class call_n(tree_node):
@@ -125,7 +128,8 @@ class call_n(tree_node):
         ctx, func = ctx.tail_val()
         paths, ctx = self.args.asm(ctx).exclude_nxt(paths)
         ctx, args = ctx.tail_val()
-        return ctx.call(func, args).join(paths)
+        paths = ctx.call(func, args).join(paths)
+        return paths.del_vals(func, args)
 
 @dataclass
 class attribute_ref_n(tree_node):
@@ -135,7 +139,8 @@ class attribute_ref_n(tree_node):
     def asm(self, ctx: context) -> context_paths:
         paths, ctx = self.prim.asm(ctx).exclude_nxt()
         ctx, prim = ctx.tail_val()
-        return ctx.attrib(prim, self.attrib).join(paths)
+        paths = ctx.attrib(prim, self.attrib).join(paths)
+        return paths.del_vals(prim)
 
 @dataclass
 class attribute_trgt_n(tree_node):
@@ -145,7 +150,8 @@ class attribute_trgt_n(tree_node):
     def asm(self, ctx: context) -> context_paths:
         paths, ctx = self.prim.asm(ctx).exclude_nxt()
         ctx, prim = ctx.tail_val()
-        return ctx.attrib_ref(prim, self.attrib).join(paths)
+        paths = ctx.attrib_ref(prim, self.attrib).join(paths)
+        return paths.del_vals(prim)
 
 @dataclass
 class slice_n(tree_node):
@@ -163,7 +169,8 @@ class subscript_n(tree_node):
         ctx, prim = ctx.tail_val()
         paths, ctx = self.prim.asm(ctx).exclude_nxt(paths)
         ctx, subscript = ctx.tail_val()
-        return ctx.subscript(prim, subscript).join(paths)
+        paths = ctx.subscript(prim, subscript).join(paths)
+        return paths.del_vals(prim, subscript)
 
 @dataclass
 class subscript_trgt_n(tree_node):
@@ -175,7 +182,8 @@ class subscript_trgt_n(tree_node):
         ctx, prim = ctx.tail_val()
         paths, ctx = self.prim.asm(ctx).exclude_nxt(paths)
         ctx, subscript = ctx.tail_val()
-        return ctx.subscript_ref(prim, subscript).join(paths)
+        paths = ctx.subscript_ref(prim, subscript).join(paths)
+        return paths.del_vals(prim, subscript)
 
 @dataclass
 class idf_trgt_n(tree_node):
@@ -184,7 +192,7 @@ class idf_trgt_n(tree_node):
     def asm(self, ctx: context) -> context_paths:
         paths, ctx = ctx.lookup_idf(self.name).exclude_nxt()
         ctx, trgt = ctx.tail_val()
-        return ctx.lookup_ref(trgt).join(paths)
+        return ctx.lookup_ref(trgt).join(paths).del_vals(trgt)
 
 @dataclass
 class star_trgt_n(tree_node):
@@ -205,7 +213,8 @@ class tuple_n(tree_node):
             paths, ctx = expr.asm(ctx).exclude_nxt(paths)
             ctx, tupval = ctx.tail_val()
             values.append(tupval)
-        return ctx.group('tuple', *values).join(paths)
+        paths = ctx.group('tuple', *values).join(paths)
+        return paths.del_vals(*values)
 
 @dataclass
 class list_trgt_n(tree_node):
@@ -222,7 +231,8 @@ class list_n(tree_node):
             paths, ctx = expr.asm(ctx).exclude_nxt(paths)
             ctx, listval = ctx.tail_val()
             values.append(listval)
-        return ctx.group('list', *values).join(paths)
+        paths = ctx.group('list', *values).join(paths)
+        return paths.del_vals(*values)
 
 @dataclass
 class iter_n(tree_node):
@@ -238,7 +248,8 @@ class for_n(tree_node):
     def asm(self, ctx: context) -> context_paths:
         paths, ctx = self.iterable.asm(ctx).exclude_nxt()
         ctx, iterable = ctx.tail_val()
-        paths, ctx = ctx.iterator(iterable).exclude_nxt(paths)
+        tpaths = ctx.iterator(iterable).del_vals(iterable)
+        paths, ctx = tpaths.exclude_nxt(paths)
         ctx, iterator = ctx.tail_val()
 
         fctx = ctx.newloop()
@@ -246,10 +257,11 @@ class for_n(tree_node):
         fctx, next_element = fctx.tail_val()
         fpaths, fctx = self.trgt.asm(fctx).exclude_nxt(fpaths)
         fctx, trgt = fctx.tail_val()
-        fpaths, fctx = fctx.assign(next_element, trgt).exclude_nxt(fpaths)
+        tpaths = fctx.assign(next_element, trgt).del_vals(next_element, trgt)
+        fpaths, fctx = tpaths.exclude_nxt(fpaths)
         fpaths = self.block.asm(fctx).join(fpaths)
 
-        return ctx.loop(fpaths).join(paths)
+        return ctx.loop(fpaths).join(paths).del_vals(iterator)
 
 @dataclass
 class if_n(tree_node):
@@ -333,8 +345,8 @@ class assignment_n(tree_node):
         for trgt in self.trgts:
             paths, ctx = trgt.asm(ctx).exclude_nxt(paths)
             ctx, trgt = ctx.tail_val()
-            paths, ctx = ctx.assign(trgt, expr).exclude_nxt(paths)
-        return paths.join_nxt(ctx)
+            paths, ctx = ctx.assign(trgt, expr).del_vals(trgt).exclude_nxt(paths)
+        return paths.join_nxt(ctx).del_vals(expr)
 
 @dataclass
 class compare_n(tree_node):
@@ -347,11 +359,12 @@ class compare_n(tree_node):
         for op, expr in self.compares:
             paths, ctx = expr.asm(ctx).exclude_nxt(paths)
             ctx, argb = ctx.tail_val()
-            paths, ctx = ctx.binop(op, arga, argb).exclude_nxt(paths)
+            tpaths = ctx.binop(op, arga, argb).del_vals(arga)
             arga = argb
+            paths, ctx = tpaths.exclude_nxt(paths)
             paths, ctx, if_false = ctx.branch(paths)
             paths = paths.join_nxt(if_false)
-        return paths.join_nxt(ctx)
+        return paths.join_nxt(ctx).del_vals(arga)
 
 @dataclass
 class binary_op_n(tree_node):
@@ -367,7 +380,8 @@ class binary_op_n(tree_node):
         ctx, arga = ctx.tail_val()
         paths, ctx = self.expr_b.asm(ctx).exclude_nxt(paths)
         ctx, argb = ctx.tail_val()
-        return ctx.binop(self.op, arga, argb).join(paths)
+        paths = ctx.binop(self.op, arga, argb).join(paths)
+        return paths.del_vals(arga, argb)
 
 @dataclass
 class unary_op_n(tree_node):
@@ -380,7 +394,8 @@ class unary_op_n(tree_node):
     def asm(self, ctx: context) -> context_paths:
         paths, ctx = self.expr.asm(ctx).exclude_nxt()
         ctx, arg = ctx.tail_val()
-        return ctx.unop(self.op, arg).join(paths)
+        paths = ctx.unop(self.op, arg).join(paths)
+        return paths.del_vals(arg)
 
 @dataclass
 class await_n(tree_node):
