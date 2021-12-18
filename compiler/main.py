@@ -12,14 +12,10 @@ class parser_manip:
         n = funs.file_r(p)
 
 
-        ctx = comp.context()
-        i = n.asm(ctx)
-        asm = comp.asm()
-        i.asm(asm)
-        for l in asm.list():
-            print(l)
+        ctx = comp.context('program', 'start')
+        n.asm(ctx)
 
-        print('success')
+        print('main success')
 
 def main(filename:str):
     with open(filename, 'r') as f:

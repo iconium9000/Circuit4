@@ -26,9 +26,9 @@ class program_n(tree_node):
     stmt:tree_node
 
     def asm(self, ctx: context) -> context_paths:
-        paths, fctx = ctx.inst('frame', 'prog')
+        fctx = context('frame', 'program')
         fpaths = self.stmt.asm(fctx)
-        return ctx.path_inst('program', fpaths, paths)
+        return ctx.catch_frame(fctx, fpaths)
 
 @dataclass
 class int_lit_n(tree_node):
@@ -122,7 +122,7 @@ class arguments_n(tree_node):
             paths, ctx = ctx.push_reg(paths)
         paths, ctx = ctx.reg_peeks(len(self.exprs), paths)
         paths, ctx = ctx.inst('group', 'args', paths)
-        return ctx.join_nxt(ctx).reset_stack()
+        return ctx.join_nxt(paths).reset_stack()
 
 
 @dataclass
@@ -225,7 +225,7 @@ class tuple_n(tree_node):
             paths, ctx = ctx.push_reg(paths)
         paths, ctx = ctx.reg_peeks(len(self.exprs), paths)
         paths, ctx = ctx.inst('group', 'tuple', paths)
-        return ctx.join_nxt(ctx).reset_stack()
+        return ctx.join_nxt(paths).reset_stack()
 
 
 @dataclass
@@ -243,7 +243,7 @@ class list_n(tree_node):
             paths, ctx = ctx.push_reg(paths)
         paths, ctx = ctx.reg_peeks(len(self.exprs), paths)
         paths, ctx = ctx.inst('group', 'list', paths)
-        return ctx.join_nxt(ctx).reset_stack()
+        return ctx.join_nxt(paths).reset_stack()
 
 
 @dataclass
@@ -263,13 +263,13 @@ class for_n(tree_node):
         paths, ctx = ctx.push_reg(paths)
         paths, ctx = self.trgt.asm(ctx).split_nxt(paths)
         paths, ctx = ctx.push_reg(paths)
-        paths, lctx = ctx.inst('frame', 'loop', paths)
+        lctx = lctx_start = context('frame', 'loop')
         lpaths, lctx = lctx.reg_peeks(2)
         lpaths, lctx = lctx.inst('next', 'iter,trgt', lpaths)
         lpaths, lctx = self.block.asm(lctx).split_nxt(lpaths)
         lpaths, lctx = lctx.inst('del', 'reg', lpaths)
         lpaths = lctx.join_nxt(lpaths)
-        return ctx.path_inst('loop', lpaths, paths).reset_stack()
+        return ctx.catch_frame(lctx_start, lpaths, paths).reset_stack()
 
 @dataclass
 class if_n(tree_node):
@@ -307,9 +307,9 @@ class generator_n(tree_node):
     stmt:tree_node
 
     def asm(self, ctx: context) -> context_paths:
-        paths, gctx = ctx.inst('frame', 'gen')
+        gctx = context('frame', 'generator')
         gpaths = self.stmt.asm(gctx)
-        return ctx.path_inst('generator', gpaths, paths)
+        return ctx.catch_frame(gctx, gpaths)
 
 
 @dataclass
