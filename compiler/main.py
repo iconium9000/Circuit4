@@ -1,9 +1,9 @@
 # main.py
 import sys
-from typing import Iterable, NoReturn
 import cyparser
 import cyparsefuns as funs
 import cycompiler as comp
+import cyassembler as assy
 
 class parser_manip:
 
@@ -13,7 +13,11 @@ class parser_manip:
 
 
         ctx = comp.context('program', 'start')
-        n.asm(ctx)
+        paths = n.asm(ctx)
+        prog_end = comp.context('exit', 'prog-end')
+        for c in paths._ctxs.values():
+            c._setnext(prog_end)
+        assy.assembler(ctx)
 
         print('main success')
 

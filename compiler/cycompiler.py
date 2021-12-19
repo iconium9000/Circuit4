@@ -1,9 +1,12 @@
 # cycompiler.py
-from dataclasses import dataclass
-import cyassembler as assy
-from cyassembler import c_node
 
-class context_paths:
+class base_context:
+    def op_info(self) -> tuple[str, str]:
+        raise NotImplementedError()
+
+class context_paths(base_context):
+    def op_info(self) -> tuple[str, str]:
+        return 'paths', 'no-op'
 
     @classmethod
     def joinall(cls,
@@ -51,7 +54,10 @@ class context_paths:
             ctxs = self._ctxs
         return self.joinall('join', *joins, **ctxs), nctx
 
-class context:
+class context(base_context):
+
+    def op_info(self) -> tuple[str, str]:
+        return self._op, self._info
 
     def _setnext(self, n:'context_paths|context'):
         assert self._next is None
@@ -59,6 +65,7 @@ class context:
         return n
 
     def __init__(self, op:str, info:str='no-op'):
+        assert isinstance(op, str)
         self._op = op
         self._info = info
         self._next = None
@@ -72,44 +79,36 @@ class context:
         return context_paths.joinall('join', *joins, n=self)
 
     def push_reg(self, *joins:context_paths):
-        nctx = context('push', 'reg')
-        ectx = context('exc', 'push-reg')
-        self._setnext(context_paths(n=nctx, e=ectx))
-        return context_paths.joinall('join', *joins, e=ectx), nctx
+        return self.inst('push-reg', 'reg', *joins)
 
     def reg_peeks(self, count:int, *joins:context_paths):
-        nctx = context('peek', str(count))
-        ectx = context('exc', f'peek-count({count})')
-        self._setnext(context_paths(n=nctx, e=ectx))
-        return context_paths.joinall('join', *joins, e=ectx), nctx
+        return self.inst('reg-peeks', str(count), *joins)
 
     def reg_pops(self, count:int, *joins:context_paths):
-        nctx = context('reg-pop', str(count))
-        ectx = context('exc', f'reg-pop-count({count})')
-        self._setnext(context_paths(n=nctx, e=ectx))
-        return context_paths.joinall('join', *joins, e=ectx), nctx
+        return self.inst('reg-pops', str(count), *joins)
 
     def del_pops(self, count:int, *joins:context_paths):
-        nctx = context('del-pop', str(count))
-        ectx = context('exc', f'reg-pop-count({count})')
-        self._setnext(context_paths(n=nctx, e=ectx))
-        return context_paths.joinall('join', *joins, e=ectx), nctx
+        return self.inst('del-pops', str(count), *joins)
 
     def inst(self, i:str, op:str, *joins:context_paths):
-        nctx = context(i, op)
-        ectx = context('exc', f'{i}-{op}')
-        self._setnext(context_paths(n=nctx, e=ectx))
+        ictx = context(i, op)
+        nctx = context('pass', 'no-op')
+        ectx = context('exc', f'{i}({op})')
+        ictx._setnext(context_paths(n=nctx, e=ectx))
+        self._setnext(ictx)
         return context_paths.joinall('join', *joins, e=ectx), nctx
 
     def catch_frame(self,
         ctx_start: 'context',
         caught_paths: context_paths,
         *joins:context_paths):
-            nctx = context_frame(ctx_start._info, ctx_start, caught_paths)
+            fctx = context_frame(ctx_start._info, ctx_start, caught_paths)
+            nctx = context('pass', 'no-op')
             ectx = context('exc', 'frame')
             paths = context_paths(n=nctx, e=ectx)
-            self._setnext(paths)
-            return context_paths.joinall(paths, *joins)
+            fctx._setnext(paths)
+            self._setnext(fctx)
+            return context_paths.joinall('join', paths, *joins)
 
     def setrange(self, s:int, e:int):
         nxt = context('range', f'{s},{e}')
@@ -117,10 +116,12 @@ class context:
         return nxt
 
     def branch(self, *joins:context_paths):
+        yctx = context('branch', 'reg')
         tctx = context('branch', 'True')
         fctx = context('branch', 'False')
         ectx = context('exc', 'branch')
-        self._setnext(context_paths(t=tctx, f=fctx, e=ectx))
+        yctx._setnext(context_paths(t=tctx, f=fctx, e=ectx))
+        self._setnext(yctx)
         return context_paths.joinall('join', *joins, e=ectx), tctx, fctx
 
 class context_frame(context):
@@ -132,3 +133,8 @@ class context_frame(context):
             super().__init__('frame', info)
             self._ctx_start = ctx_start
             self._caught_paths = caught_paths
+            self._exit_paths = context('exit', info)
+
+            # TODO update for different infos
+            for ctx in caught_paths._ctxs.values():
+                ctx._setnext(self._exit_paths)
