@@ -21,6 +21,7 @@ class tree_range_n(tree_node):
         ctx = ctx.setrange(self.start_tok.tidx, self.next_tok.tidx)
         return self.node.asm(ctx)
 
+
 @dataclass
 class program_n(tree_node):
     stmt:tree_node
@@ -30,6 +31,7 @@ class program_n(tree_node):
         fpaths = self.stmt.asm(fctx)
         return ctx.catch_frame(fctx, fpaths)
 
+
 @dataclass
 class int_lit_n(tree_node):
     num:str
@@ -38,9 +40,11 @@ class int_lit_n(tree_node):
         paths, ctx = ctx.inst('int-l', self.num)
         return ctx.join_nxt(paths)
 
+
 @dataclass
 class string_n(tree_node):
     strings:tuple[str, ...]
+
 
 @dataclass
 class idf_n(tree_node):
@@ -54,6 +58,7 @@ class idf_n(tree_node):
 @dataclass
 class bool_n(tree_node):
     value:'bool|None'
+
 
 @dataclass
 class ellipsis_n(tree_node):
@@ -70,6 +75,7 @@ class statements_n(tree_node):
             paths, ctx = ctx.inst('del', 'reg')
         return ctx.join_nxt(paths)
 
+
 @dataclass
 class raise_n(tree_node):
     expr:tree_node
@@ -84,6 +90,7 @@ class yield_n(tree_node):
         paths, ctx = ctx.inst('yield', 'reg', paths)
         return ctx.join_nxt(paths).reset_stack()
 
+
 @dataclass
 class hint_n(tree_node):
     trgt:tree_node
@@ -97,6 +104,7 @@ class hint_n(tree_node):
         paths, ctx = ctx.reg_peeks(2, paths)
         paths, ctx = ctx.inst('hint', 'var,hint', paths)
         return ctx.join_nxt(paths).reset_stack()
+
 
 @dataclass
 class kwarg_n(tree_node):
@@ -139,6 +147,7 @@ class call_n(tree_node):
         paths, ctx = ctx.inst('call', 'func,args', paths)
         return ctx.join_nxt(paths).reset_stack()
 
+
 @dataclass
 class attribute_ref_n(tree_node):
     prim:tree_node
@@ -162,11 +171,13 @@ class attribute_trgt_n(tree_node):
         paths, ctx = ctx.inst('attrib-ref', self.attrib, paths)
         return ctx.join_nxt(paths).reset_stack()
 
+
 @dataclass
 class slice_n(tree_node):
     arg1:'tree_node|None'
     arg2:'tree_node|None'
     arg3:'tree_node|None'
+
 
 @dataclass
 class subscript_n(tree_node):
@@ -206,6 +217,7 @@ class idf_trgt_n(tree_node):
         path, ctx = ctx.inst('idf-ref', self.name)
         return ctx.join_nxt(path)
 
+
 @dataclass
 class star_trgt_n(tree_node):
     expr:tree_node
@@ -213,6 +225,7 @@ class star_trgt_n(tree_node):
 @dataclass
 class tuple_trgt_n(tree_node):
     trgts:tuple[tree_node, ...]
+
 
 @dataclass
 class tuple_n(tree_node):
@@ -231,6 +244,7 @@ class tuple_n(tree_node):
 @dataclass
 class list_trgt_n(tree_node):
     exprs:tuple[tree_node, ...]
+
 
 @dataclass
 class list_n(tree_node):
@@ -271,6 +285,7 @@ class for_n(tree_node):
         lpaths = lctx.join_nxt(lpaths)
         return ctx.catch_frame(lctx_start, lpaths, paths).reset_stack()
 
+
 @dataclass
 class if_n(tree_node):
     test:tree_node
@@ -289,7 +304,7 @@ class if_n(tree_node):
 
 @dataclass
 class pass_n(tree_node):
-    
+
     def asm(self, ctx: context) -> context_paths:
         return ctx.join_nxt()
 
@@ -331,6 +346,7 @@ class or_block_n(tree_node):
             paths = tctx.join_nxt(paths)
         return fctx.join_nxt(paths)
 
+
 @dataclass
 class and_block_n(tree_node):
     '''
@@ -349,6 +365,7 @@ class and_block_n(tree_node):
             paths, tctx, fctx = tctx.branch(paths)
             paths = fctx.join_nxt(paths)
         return tctx.join_nxt(paths)
+
 
 @dataclass
 class assignment_n(tree_node):
@@ -388,6 +405,7 @@ class compare_n(tree_node):
             paths, ctx = tctx.del_pops(-1, paths)
         return ctx.join_nxt(paths).reset_stack()
 
+
 @dataclass
 class binary_op_n(tree_node):
     '''
@@ -420,6 +438,7 @@ class unary_op_n(tree_node):
         paths, ctx = ctx.push_reg()
         paths, ctx = ctx.inst('unop', self.op, paths)
         return ctx.join_nxt(paths).reset_stack()
+
 
 @dataclass
 class await_n(tree_node):

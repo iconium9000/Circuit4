@@ -52,7 +52,7 @@ class context_paths:
         return self.joinall('join', *joins, **ctxs), nctx
 
 class context:
-    
+
     def _setnext(self, n:'context_paths|context'):
         assert self._next is None
         self._next = n
@@ -61,9 +61,7 @@ class context:
     def __init__(self, op:str, info:str='no-op'):
         self._op = op
         self._info = info
-        self._frame:'context_paths|context|None' = None
-        self._caught_paths:'context_paths|None' = None
-        self._next:'context_paths|context|None' = None
+        self._next = None
 
     def set_stack(self, *joins:context_paths):
         ctx = context('stk-set')
