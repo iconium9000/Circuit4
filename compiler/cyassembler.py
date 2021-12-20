@@ -20,8 +20,9 @@ def assember(sctx:context):
                     ctx._ctxs[n] = nctx
                 nctx._prevs[id(ctx)] = ctx
 
-            for nctx in tuple(ctx._ctxs.values())[::-1]:
-                stack.append(nctx)
+            for n in ('e','s','f','t','n'):
+                if n in ctx._ctxs:
+                    stack.append(ctx._ctxs[n])
 
     for ctx in labels:
         print(str(ctx))

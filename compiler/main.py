@@ -14,9 +14,9 @@ class parser_manip:
 
         ctx = comp.context('program', 'start')
         paths = n.asm(ctx)
-        xctx = comp.context('exit', 'pass')
-        for pctx in paths._ctxs.values():
-            pctx._setctxs(n=xctx)
+        for n,nctx in paths._ctxs.items():
+            xctx = comp.context('program-exit', n)
+            nctx._setctxs(n=xctx)
 
         assy.assember(ctx)
         print('main success')

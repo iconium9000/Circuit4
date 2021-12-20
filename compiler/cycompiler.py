@@ -16,10 +16,12 @@ class context_paths(base_context):
 
     def set_stack(self, *joins:'context_paths'):
         ctxs, ctx = splitctxs('n', self._ctxs)
-        return joinall('stk-set', *joins, **ctxs), ctx
+        nctx = context('stack-set', 'pass')
+        ctx._setctxs(n=nctx)
+        return joinall('stack-set', *joins, **ctxs), nctx
 
     def reset_stack(self):
-        return joinall('stk-reset', self)
+        return joinall('stack-reset', self)
 
 class context(base_context):
 
@@ -53,9 +55,9 @@ class context(base_context):
         self._setctxs(**ctxs)
 
     def set_stack(self, *joins:context_paths):
-        nctx = context('stk-set', 'pass')
+        nctx = context('stack-set', 'pass')
         self._setctxs(n=nctx)
-        return joinall('stk-set', *joins), nctx
+        return joinall('stack-set', *joins), nctx
 
     def join_nxt(self, *joins:context_paths):
         return joinall('pass', *joins, n=self)
@@ -94,8 +96,10 @@ class context(base_context):
         ectx = context('exc', f'frame-set(s)')
         fs:dict[str, context] = {}
         nctx = context('frame-set', 's', s=fctx, e=ectx)
-        for ctx in fpaths._ctxs.values():
-            ctx._setctxs(n=nctx)
+        for n,ctx in fpaths._ctxs.items():
+            xctx = context('frame-exit', n)
+            xctx._setctxs(n=nctx)
+            ctx._setctxs(n=xctx)
         joinall('frame-exit', **fs)
         self._setctxs(n=nctx)
         return joinall('pass', *joins, n=nctx, e=ectx)
@@ -107,8 +111,8 @@ class context(base_context):
 
     def branch(self, *joins:context_paths):
         ectx = context('exc', f'frame-set(s)')
-        tctx = context('assert', 'True')
-        fctx = context('assert', 'False')
+        tctx = context('branch-assert', 'True')
+        fctx = context('branch-assert', 'False')
         nctx = context('branch', 'reg', t=tctx, f=fctx, e=ectx)
         self._setctxs(n=nctx)
         return joinall('pass', *joins, e=ectx), tctx, fctx
