@@ -72,7 +72,7 @@ class statements_n(tree_node):
         paths, ctx = ctx.join_nxt().split_nxt()
         for expr in self.exprs:
             paths, ctx = expr.asm(ctx).split_nxt(paths)
-            paths, ctx = ctx.inst('del', 'reg')
+            paths, ctx = ctx.inst('del', 'reg', paths)
         return ctx.join_nxt(paths)
 
 

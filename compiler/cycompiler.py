@@ -1,140 +1,132 @@
 # cycompiler.py
 
 class base_context:
-    def op_info(self) -> tuple[str, str]:
-        raise NotImplementedError()
 
-class context_paths(base_context):
-    def op_info(self) -> tuple[str, str]:
-        return 'paths', 'no-op'
-
-    @classmethod
-    def joinall(cls,
-        op:str,
-        *joins:'context_paths',
-        **ctxs:'context'):
-        join_ctxs:dict[str, context] = {}
-        for j in joins:
-            for n,ctx in j._ctxs.items():
-                if n not in join_ctxs:
-                    join_ctxs[n] = context(op, 'no-op')
-                ctx._setnext(join_ctxs[n])
-        for n,ctx in ctxs.items():
-            if n not in join_ctxs:
-                join_ctxs[n] = context(op, 'no-op')
-            ctx._setnext(join_ctxs[n])
-        paths = cls.__new__(cls)
-        paths._ctxs = join_ctxs
-        return paths
-
-    def __init__(self, **ctxs:'context'):
+    def __init__(self, ctxs:dict[str, 'context']):
         self._ctxs = ctxs
 
-    def set_stack(self, *joins:'context_paths'):
-        nctx = context('stk-set')
-        if 'n' in self._ctxs:
-            ctxs = self._ctxs.copy()
-            ctxs.pop('n')._setnext(nctx)
-        else:
-            ctxs = self._ctxs
-        return self.joinall('stk-set', *joins, **ctxs), nctx
-
-    def reset_stack(self):
-        return context_paths.joinall('stk-reset', self)
-
-    def join(self, *joins:'context_paths'):
-        return self.joinall('join', self, *joins)
+class context_paths(base_context):
 
     def split_nxt(self, *joins:'context_paths'):
-        nctx = context('join')
-        if 'n' in self._ctxs:
-            ctxs = self._ctxs.copy()
-            ctxs.pop('n')._setnext(nctx)
-        else:
-            ctxs = self._ctxs
-        return self.joinall('join', *joins, **ctxs), nctx
+        ctxs, ctx = splitctxs('n', self._ctxs)
+        return joinall('pass', *joins, **ctxs), ctx
+
+    def join(self, *joins:'context_paths'):
+        return joinall('pass', self, *joins)
+
+    def set_stack(self, *joins:'context_paths'):
+        ctxs, ctx = splitctxs('n', self._ctxs)
+        return joinall('stk-set', *joins, **ctxs), ctx
+
+    def reset_stack(self):
+        return joinall('stk-reset', self)
 
 class context(base_context):
 
-    def op_info(self) -> tuple[str, str]:
-        return self._op, self._info
+    def _skip(self):
+        return self._op in ('pass', 'range-set')
 
-    def _setnext(self, n:'context_paths|context'):
-        assert self._next is None
-        self._next = n
-        return n
+    def _setctxs(self, **ctxs:'context'):
+        if not ctxs: return
+        if self._skip():
+            assert {'n'} == ctxs.keys()
+        for n,nctx in ctxs.items():
+            assert n not in self._ctxs
+            self._ctxs[n] = nctx
 
-    def __init__(self, op:str, info:str='no-op'):
-        assert isinstance(op, str)
+    def _setid(self, i:int):
+        assert self._id is None
+        self._id = f'@{i}'
+
+    def __str__(self):
+        f = f'{self._id} {self._op}({self._arg})'
+        f += ','.join(f' {n}={ctx._id}' for n,ctx in self._ctxs.items())
+        f += f" ({', '.join(ctx._id for ctx in self._prevs.values())})"
+        return f
+
+    def __init__(self, op:str, arg:str, **ctxs:'context'):
+        super().__init__({})
+        self._id = None
         self._op = op
-        self._info = info
-        self._next = None
+        self._arg = arg
+        self._prevs:dict[int,context] = {}
+        self._setctxs(**ctxs)
 
     def set_stack(self, *joins:context_paths):
-        ctx = context('stk-set')
-        self._setnext(ctx)
-        return context_paths.joinall('stk-set', *joins), ctx
+        nctx = context('stk-set', 'pass')
+        self._setctxs(n=nctx)
+        return joinall('stk-set', *joins), nctx
 
     def join_nxt(self, *joins:context_paths):
-        return context_paths.joinall('join', *joins, n=self)
+        return joinall('pass', *joins, n=self)
 
     def push_reg(self, *joins:context_paths):
-        return self.inst('push-reg', 'reg', *joins)
+        ectx = context('exc', 'push-reg')
+        nctx = context('push-reg', 'reg', e=ectx)
+        self._setctxs(n=nctx)
+        return joinall('pass', *joins, e=ectx), nctx
 
     def reg_peeks(self, count:int, *joins:context_paths):
-        return self.inst('reg-peeks', str(count), *joins)
+        ectx = context('exc', f'reg-peeks({count})')
+        nctx = context('reg-peeks', str(count), e=ectx)
+        self._setctxs(n=nctx)
+        return joinall('pass', *joins, e=ectx), nctx
 
     def reg_pops(self, count:int, *joins:context_paths):
-        return self.inst('reg-pops', str(count), *joins)
+        ectx = context('exc', f'reg-pops({count})')
+        nctx = context('reg-pops', str(count), e=ectx)
+        self._setctxs(n=nctx)
+        return joinall('pass', *joins, e=ectx), nctx
 
     def del_pops(self, count:int, *joins:context_paths):
-        return self.inst('del-pops', str(count), *joins)
+        ectx = context('exc', f'del-pops({count})')
+        nctx = context('del-pops', str(count), e=ectx)
+        self._setctxs(n=nctx)
+        return joinall('pass', *joins, e=ectx), nctx
 
-    def inst(self, i:str, op:str, *joins:context_paths):
-        ictx = context(i, op)
-        nctx = context('pass', 'no-op')
-        ectx = context('exc', f'{i}({op})')
-        ictx._setnext(context_paths(n=nctx, e=ectx))
-        self._setnext(ictx)
-        return context_paths.joinall('join', *joins, e=ectx), nctx
+    def inst(self, op:str, arg:str, *joins:context_paths):
+        ectx = context('exc', f'{op}({arg})')
+        nctx = context(op, arg, e=ectx)
+        self._setctxs(n=nctx)
+        return joinall('pass', *joins, e=ectx), nctx
 
-    def catch_frame(self,
-        ctx_start: 'context',
-        caught_paths: context_paths,
-        *joins:context_paths):
-            fctx = context_frame(ctx_start._info, ctx_start, caught_paths)
-            nctx = context('pass', 'no-op')
-            ectx = context('exc', 'frame')
-            paths = context_paths(n=nctx, e=ectx)
-            fctx._setnext(paths)
-            self._setnext(fctx)
-            return context_paths.joinall('join', paths, *joins)
+    def catch_frame(self, fctx:'context', fpaths:context_paths, *joins:context_paths):
+        ectx = context('exc', f'frame-set(s)')
+        fs:dict[str, context] = {}
+        nctx = context('frame-set', 's', s=fctx, e=ectx)
+        for ctx in fpaths._ctxs.values():
+            ctx._setctxs(n=nctx)
+        joinall('frame-exit', **fs)
+        self._setctxs(n=nctx)
+        return joinall('pass', *joins, n=nctx, e=ectx)
 
     def setrange(self, s:int, e:int):
-        nxt = context('range', f'{s},{e}')
-        self._setnext(nxt)
-        return nxt
+        nctx = context('range-set', f'{s},{e}')
+        self._setctxs(n=nctx)
+        return nctx
 
     def branch(self, *joins:context_paths):
-        yctx = context('branch', 'reg')
-        tctx = context('branch', 'True')
-        fctx = context('branch', 'False')
-        ectx = context('exc', 'branch')
-        yctx._setnext(context_paths(t=tctx, f=fctx, e=ectx))
-        self._setnext(yctx)
-        return context_paths.joinall('join', *joins, e=ectx), tctx, fctx
+        ectx = context('exc', f'frame-set(s)')
+        tctx = context('assert', 'True')
+        fctx = context('assert', 'False')
+        nctx = context('branch', 'reg', t=tctx, f=fctx, e=ectx)
+        self._setctxs(n=nctx)
+        return joinall('pass', *joins, e=ectx), tctx, fctx
 
-class context_frame(context):
+def splitctxs(n:str, ctxs:dict[str, context]):
+    sctxs = ctxs.copy()
+    if not (ctx := sctxs.pop(n, None)):
+        ctx = context('pass', 'pass')
+    return sctxs, ctx
 
-    def __init__(self,
-        info: str,
-        ctx_start:context,
-        caught_paths:context_paths):
-            super().__init__('frame', info)
-            self._ctx_start = ctx_start
-            self._caught_paths = caught_paths
-            self._exit_paths = context('exit', info)
+def joinctxs(op:str, jctxs:dict[str, context], pctxs:dict[str, context]):
+    for n,pctx in pctxs.items():
+        if n not in jctxs:
+            jctxs[n] = context(op, 'pass')
+        pctx._setctxs(n=jctxs[n])
 
-            # TODO update for different infos
-            for ctx in caught_paths._ctxs.values():
-                ctx._setnext(self._exit_paths)
+def joinall(op:str, *paths:context_paths, **ctxs:context):
+    join_ctxs:dict[str, context] = {}
+    for path in paths: joinctxs(op, join_ctxs, path._ctxs)
+    joinctxs(op, join_ctxs, ctxs)
+    return context_paths(join_ctxs)

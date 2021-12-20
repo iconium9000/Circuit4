@@ -14,11 +14,11 @@ class parser_manip:
 
         ctx = comp.context('program', 'start')
         paths = n.asm(ctx)
-        prog_end = comp.context('exit', 'prog-end')
-        for c in paths._ctxs.values():
-            c._setnext(prog_end)
-        assy.assembler(ctx)
+        xctx = comp.context('exit', 'pass')
+        for pctx in paths._ctxs.values():
+            pctx._setctxs(n=xctx)
 
+        assy.assember(ctx)
         print('main success')
 
 def main(filename:str):
