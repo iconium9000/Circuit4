@@ -95,10 +95,10 @@ class context(base_context):
     def catch_frame(self, fctx:'context', fpaths:context_paths, *joins:context_paths):
         ectx = context('exc', f'frame-set(s)')
         fs:dict[str, context] = {}
-        nctx = context('frame-set', 's', s=fctx, e=ectx)
+        nctx = context('frame-set', 'fs', fs=fctx, e=ectx)
         for n,ctx in fpaths._ctxs.items():
             xctx = context('frame-exit', n)
-            xctx._setctxs(n=nctx)
+            xctx._setctxs(n=fctx)
             ctx._setctxs(n=xctx)
         joinall('frame-exit', **fs)
         self._setctxs(n=nctx)
